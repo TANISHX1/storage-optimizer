@@ -55,7 +55,22 @@ if stat, ok := info.Sys().(*syscall.Stat_t); ok {
 
 ---
 
-## 3. Avoiding File Descriptor Exhaustion (`EMFILE`)
+## 3. System Storage Classification & OS Safety
+
+Linux organizes system-level data across well-defined root hierarchies. During directory traversal, every path is parsed and classified into one of 6 core categories:
+
+| Category | Typical Linux Paths | Nature & Lifecycle | Safety Rule |
+| :--- | :--- | :--- | :--- |
+| `system_protected` | `/etc`, `/usr`, `/boot`, `/lib`, `/bin`, `/opt` | Critical operating system binaries and configuration | **STRICTLY PROTECTED**: Staleness weight = `0.01`, cannot be deleted. |
+| `system_log` | `/var/log`, `/var/adm`, `*.log`, `*.syslog` | Diagnostic logs, journald archives, syslog files | **CLEANUP CANDIDATE**: Staleness boost = `1.30`. |
+| `crash_dump` | `/var/crash`, `/var/lib/systemd/coredump`, `*.core`, `*.dmp` | Application crash memory dumps | **HIGH-VALUE CLEANUP**: Staleness boost = `1.40`. |
+| `temp` | `/tmp`, `/var/tmp`, `/dev/shm`, `*.lock`, `*.tmp` | Ephemeral sockets, locks, runtime scratchpads | **HIGH-VALUE CLEANUP**: Staleness boost = `1.35`. |
+| `system_cache` | `/var/cache`, `/var/spool`, `/root/.cache` | APT/Pacman packages, font caches, thumbnails | **MODERATE CLEANUP**: Staleness boost = `1.15`. |
+| `user` | `/home/...`, `/media/...`, `/mnt/...` | User documents, developer repositories, personal media | Analyzed according to standard decay rules. |
+
+---
+
+## 4. Avoiding File Descriptor Exhaustion (`EMFILE`)
 
 Every open file or directory in Linux consumes an OS File Descriptor (FD). Linux enforces a per-process limit (defaulting to 1024 on many distributions, inspectable with `ulimit -n`).
 
@@ -64,7 +79,7 @@ Every open file or directory in Linux consumes an OS File Descriptor (FD). Linux
 
 ---
 
-## 4. Streaming SHA-256 Hashing for Large Files
+## 5. Streaming SHA-256 Hashing for Large Files
 
 Computing content hashes for large files (e.g., 10 GB disk images or 4K videos) must never load the entire file into user-space memory:
 

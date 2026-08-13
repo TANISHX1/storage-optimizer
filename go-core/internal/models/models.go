@@ -6,26 +6,40 @@ import "time"
 // SYSTEM MODEL DEFINITIONS
 //
 // DATA FLOW CONTRACT:
-// 1. Filesystem Scanner -> FileMetadata (Raw Linux inode/stat extraction)
+// 1. Filesystem Scanner -> FileMetadata (Raw Linux inode/stat + OS System Category classification)
 // 2. Writer Channel Funnel -> SQLite "files" table
 // 3. Duplicate Engine -> ContentHash (SHA-256) updates & DuplicateGroup reports
-// 4. Staleness Engine -> StalenessScore computation
-// 5. Action Layer -> ActionLog audit trail & deletion execution
+// 4. Staleness Engine -> StalenessScore computation & StaleReport summaries
+// 5. Action Layer -> ActionLog audit trail & deletion execution (System Protection Gating)
 // ============================================================================
+
+// FileCategory defines classification for safe filtering and system protection.
+type FileCategory string
+
+const (
+	CategoryUser            FileCategory = "user"             // Standard user files, documents, media, code
+	CategorySystemProtected FileCategory = "system_protected" // Critical OS binaries/libraries (/bin, /usr/lib, /etc) - BLOCKED from deletion
+	CategorySystemLog       FileCategory = "system_log"       // OS and application logs (/var/log, *.log) - Eligible for stale cleanup
+	CategorySystemCache     FileCategory = "system_cache"     // System & package caches (/var/cache, apt, dnf)
+	CategoryCrashDump       FileCategory = "crash_dump"       // Application crash snapshots, core dumps (/var/crash, coredump)
+	CategoryTemp            FileCategory = "temp"             // Temporary staging files (/tmp, /var/tmp)
+)
 
 // FileMetadata represents the complete metadata captured for a single regular file
 // from the Linux filesystem before or after indexing in SQLite.
 type FileMetadata struct {
-	ID             int64     `json:"id"`              // SQLite autoincrement primary key
-	Path           string    `json:"path"`            // Absolute path on filesystem (UNIQUE)
-	Size           int64     `json:"size"`            // Size in bytes
-	Mtime          time.Time `json:"mtime"`           // Last modification time
-	Atime          time.Time `json:"atime"`           // Last access time (Linux atime/relatime)
-	Inode          uint64    `json:"inode"`           // Linux filesystem Inode number (identifies hardlinks)
-	Extension      string    `json:"extension"`       // Lowercase file extension (e.g. ".log", ".mp4")
-	ContentHash    string    `json:"content_hash"`    // SHA-256 hexadecimal digest (populated during Phase 2)
-	StalenessScore float64   `json:"staleness_score"` // 0.0 (fresh) to 1.0 (extremely stale) (populated in Phase 3)
-	LastScannedAt  time.Time `json:"last_scanned_at"`  // Timestamp of the scan that recorded this entry
+	ID             int64        `json:"id"`              // SQLite autoincrement primary key
+	Path           string       `json:"path"`            // Absolute path on filesystem (UNIQUE)
+	Size           int64        `json:"size"`            // Size in bytes
+	Mtime          time.Time    `json:"mtime"`           // Last modification time
+	Atime          time.Time    `json:"atime"`           // Last access time (Linux atime/relatime)
+	Inode          uint64       `json:"inode"`           // Linux filesystem Inode number (identifies hardlinks)
+	Extension      string       `json:"extension"`       // Lowercase file extension (e.g. ".log", ".mp4")
+	ContentHash    string       `json:"content_hash"`    // SHA-256 hexadecimal digest (populated during Phase 2)
+	StalenessScore float64      `json:"staleness_score"` // 0.0 (fresh/protected) to 1.0 (extremely stale) (Phase 3)
+	IsSystem       bool         `json:"is_system"`       // True if file resides in OS system paths
+	Category       FileCategory `json:"category"`        // File category (user, system_protected, system_log, crash_dump, temp, system_cache)
+	LastScannedAt  time.Time    `json:"last_scanned_at"`  // Timestamp of the scan that recorded this entry
 }
 
 // ScanSnapshot captures a point-in-time summary of the indexed filesystem.
@@ -60,6 +74,21 @@ type DedupReport struct {
 type FileHashUpdate struct {
 	ID          int64  `json:"id"`
 	ContentHash string `json:"content_hash"`
+}
+
+// FileStalenessUpdate represents a lightweight DTO for batch updating staleness scores in SQLite.
+type FileStalenessUpdate struct {
+	ID             int64   `json:"id"`
+	StalenessScore float64 `json:"staleness_score"`
+}
+
+// StaleReport aggregates results of files exceeding staleness thresholds.
+type StaleReport struct {
+	ThresholdDays int            `json:"threshold_days"` // Minimum untouched days requested (e.g. 30, 90, 180)
+	TotalFiles    int            `json:"total_files"`    // Total stale files matching criteria
+	TotalBytes    int64          `json:"total_bytes"`    // Total disk storage occupied by stale files
+	Files         []FileMetadata `json:"files"`          // Stale files sorted by score (descending) and size (descending)
+	Duration      time.Duration  `json:"duration"`       // Computation duration
 }
 
 // ActionMode represents the deletion strategy requested by the user.

@@ -1,99 +1,65 @@
-# 04 — Database & Schema Contract
+# 04 — Database & Schema Specification
 
-This document specifies the SQLite database configuration, PRAGMA tuning, and the canonical database schema shared across Go and Python.
-
----
-
-## 1. SQLite PRAGMA Configuration
-
-Upon connection initialization, the Go database driver configures the SQLite database engine with high-performance PRAGMAs:
-
-```sql
-PRAGMA journal_mode = WAL;
-PRAGMA synchronous = NORMAL;
-PRAGMA busy_timeout = 5000;
-PRAGMA cache_size = -64000;
-PRAGMA foreign_keys = ON;
-PRAGMA temp_store = MEMORY;
-```
-
-### Rationale:
-- **`journal_mode = WAL`**: Write-Ahead Logging replaces the traditional rollback journal. Readers do not block writers, and writers do not block readers. Reads and writes can proceed concurrently.
-- **`synchronous = NORMAL`**: In WAL mode, `NORMAL` syncs disk writes at WAL checkpoint intervals rather than on every single commit, yielding massive throughput gains without sacrificing database integrity.
-- **`busy_timeout = 5000`**: Automatically waits up to 5,000 milliseconds when encountering locked resources before throwing an error.
-- **`cache_size = -64000`**: Allocates 64 megabytes of in-process RAM cache for frequently accessed B-Tree pages.
+This document details the SQLite database architecture, connection pragmas, and the table schemas stored in `shared/schema.sql`.
 
 ---
 
-## 2. Canonical Schema Specification (`shared/schema.sql`)
+## 1. SQLite Engine Configuration
 
-### Table: `files`
-Stores file metadata, computed content hashes, and staleness scores.
-
-```sql
-CREATE TABLE IF NOT EXISTS files (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    path TEXT NOT NULL UNIQUE,
-    size INTEGER NOT NULL,
-    mtime INTEGER NOT NULL,
-    atime INTEGER,
-    inode INTEGER,
-    extension TEXT,
-    content_hash TEXT,
-    staleness_score REAL,
-    last_scanned_at INTEGER NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_files_size ON files(size);
-CREATE INDEX IF NOT EXISTS idx_files_hash ON files(content_hash);
-CREATE INDEX IF NOT EXISTS idx_files_mtime ON files(mtime);
-CREATE INDEX IF NOT EXISTS idx_files_staleness ON files(staleness_score);
-```
-
-| Column | Type | Description |
-| :--- | :--- | :--- |
-| `id` | `INTEGER PK` | Unique row identifier |
-| `path` | `TEXT UNIQUE` | Canonical absolute file path |
-| `size` | `INTEGER` | File size in bytes |
-| `mtime` | `INTEGER` | Unix timestamp of last modification |
-| `atime` | `INTEGER` | Unix timestamp of last access |
-| `inode` | `INTEGER` | Linux filesystem Inode number |
-| `extension` | `TEXT` | File extension (e.g. `.log`, `.mp4`) |
-| `content_hash` | `TEXT` | SHA-256 hex digest (populated during Phase 2) |
-| `staleness_score` | `REAL` | Staleness metric from $0.0$ to $1.0$ (populated in Phase 3) |
-| `last_scanned_at` | `INTEGER` | Unix timestamp of most recent scan |
-
----
-
-### Table: `scan_snapshots`
-Stores historical snapshots of disk usage for Python time-series regression.
+To achieve high concurrency and maximum throughput, the database connection is initialized with the following PRAGMAs:
 
 ```sql
-CREATE TABLE IF NOT EXISTS scan_snapshots (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    scanned_at INTEGER NOT NULL,
-    root_path TEXT NOT NULL,
-    total_files INTEGER,
-    total_bytes INTEGER
-);
-
-CREATE INDEX IF NOT EXISTS idx_snapshots_scanned_at ON scan_snapshots(scanned_at);
+PRAGMA journal_mode = WAL;         -- Write-Ahead Logging for concurrent readers
+PRAGMA synchronous = NORMAL;       -- Safe on Linux ext4/xfs with power-safe sync
+PRAGMA foreign_keys = ON;          -- Strict referential integrity
+PRAGMA busy_timeout = 5000;        -- 5s wait before throwing 'database is locked'
+PRAGMA temp_store = MEMORY;        -- Store temporary tables and indices in RAM
+PRAGMA cache_size = -64000;        -- 64MB memory cache for index queries
 ```
 
 ---
 
-### Table: `actions_log`
-Provides an immutable audit log of all human-confirmed cleanup actions.
+## 2. Table Specifications
 
-```sql
-CREATE TABLE IF NOT EXISTS actions_log (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    file_path TEXT NOT NULL,
-    action_mode TEXT NOT NULL,       -- 'trash' or 'permanent'
-    trashed_to_path TEXT,             -- NULL for permanent deletes
-    file_size INTEGER,
-    performed_at INTEGER NOT NULL
-);
+### 2.1 `files` Table
+The primary metadata index for all scanned filesystem objects.
 
-CREATE INDEX IF NOT EXISTS idx_actions_performed_at ON actions_log(performed_at);
-```
+| Column | Type | Constraints | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | Unique identifier for internal references |
+| `path` | `TEXT` | `NOT NULL UNIQUE` | Absolute canonical file path |
+| `size` | `INTEGER` | `NOT NULL` | File size in bytes |
+| `mtime` | `INTEGER` | `NOT NULL` | Last modified timestamp (Unix seconds) |
+| `atime` | `INTEGER` | `NOT NULL` | Last accessed timestamp (Unix seconds) |
+| `inode` | `INTEGER` | `NOT NULL` | POSIX Inode number (for hardlink deduplication) |
+| `extension` | `TEXT` | `NOT NULL` | Lowercase file extension (e.g., `.log`, `.tmp`) |
+| `category` | `TEXT` | `NOT NULL DEFAULT 'user'` | Classification: `system_protected`, `system_log`, `crash_dump`, `temp`, `system_cache`, `user` |
+| `is_system` | `INTEGER` | `NOT NULL DEFAULT 0` | Boolean flag (`1` for OS/root directories, `0` for user files) |
+| `content_hash` | `TEXT` | `NULLABLE` | Hex SHA-256 digest (computed during Pass 2) |
+| `staleness_score` | `REAL` | `NOT NULL DEFAULT 0.0` | Inactivity score $[0.0, 1.0]$ |
+| `last_scanned_at` | `INTEGER` | `NOT NULL` | Timestamp of the most recent scan |
+
+### 2.2 `scan_snapshots` Table
+Time-series growth metrics used by the Python regression and forecasting layer.
+
+| Column | Type | Constraints | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | Snapshot sequence number |
+| `scanned_at` | `INTEGER` | `NOT NULL` | Timestamp of scan completion |
+| `total_files` | `INTEGER` | `NOT NULL` | Total count of indexed files |
+| `total_bytes` | `INTEGER` | `NOT NULL` | Total cumulative size on disk |
+| `root_path` | `TEXT` | `NOT NULL` | Target root path scanned |
+
+### 2.3 `actions_log` Table
+Immutable audit trail for file cleanup actions (Phase 6).
+
+| Column | Type | Constraints | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | Action audit record ID |
+| `file_id` | `INTEGER` | `NOT NULL` | ID of the target file |
+| `file_path` | `TEXT` | `NOT NULL` | Path of file at action execution |
+| `file_size` | `INTEGER` | `NOT NULL` | Size in bytes of freed storage |
+| `action_type` | `TEXT` | `NOT NULL` | Action mode: `'trash'` or `'permanent'` |
+| `performed_at` | `INTEGER` | `NOT NULL` | Timestamp of action execution |
+| `status` | `TEXT` | `NOT NULL` | Result: `'success'` or `'failed'` |
+| `error_message` | `TEXT` | `NULLABLE` | Error description if status is failed |

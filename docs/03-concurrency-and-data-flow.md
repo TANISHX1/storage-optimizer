@@ -1,6 +1,6 @@
 # 03 — Concurrency & Data Flow
 
-This document details the goroutine lifecycle, channel buffering, backpressure, and data synchronization patterns.
+This document details the goroutine lifecycle, channel buffering, backpressure, incremental synchronization, and data synchronization patterns.
 
 ---
 
@@ -27,7 +27,7 @@ The directory scanning pipeline uses a **Bounded Worker Pool with Dynamic Work D
                 │                     │                     │
                 ├─► Discovered Subdirs ┴─► Enqueue to dirChan (atomic.Add(&active, +1))
                 │
-                └─► Discovered Regular Files
+                └─► Discovered Regular Files (Classified & Tagged)
                                       │
                                       ▼
                         ┌───────────────────────────┐
@@ -44,6 +44,11 @@ The directory scanning pipeline uses a **Bounded Worker Pool with Dynamic Work D
                                       ▼
                         ┌───────────────────────────┐
                         │    SQLite WAL Database    │
+                        └─────────────┬─────────────┘
+                                      │
+                                      ▼ (Post-Scan Stage)
+                        ┌───────────────────────────┐
+                        │   PruneDeletedFiles()     │ -> Purges removed files
                         └───────────────────────────┘
 ```
 
@@ -70,11 +75,51 @@ If filesystem reads are faster than disk persistence (or vice versa), unconstrai
 
 ---
 
-## 3. The Funnel-to-Single-Writer Pattern
+## 3. Incremental Re-Scanning & Deletion Pruning (Phase 4)
 
-SQLite uses file-level locking. Multiple concurrent goroutines opening transactions simultaneously produce `database is locked` errors.
+In long-running operations and recurring scans, re-scanning unchanged files is redundant:
 
-### The Solution:
-- Only **one dedicated goroutine** (`BatchWriter`) executes write transactions (`INSERT`, `UPDATE`, `DELETE`) against the database.
-- Scanner workers, duplicate detectors, and action handlers act purely as producers, sending structs across Go channels.
-- The `BatchWriter` collects items into memory slices and commits them in batches of 500 items (or on a 50ms ticker timeout), turning thousands of single disk writes into a single batched WAL commit.
+```
+[Incoming FileMetadata]
+          │
+          ▼
+   [UPSERT In DB] ─── Has (mtime, size) Changed? ───┐
+          │                                         │
+          ├─► NO  (Unchanged)                       ├─► YES (Modified)
+          │   Preserve content_hash                 │   Invalidate content_hash = NULL
+          │   Preserve staleness_score              │   Invalidate staleness_score = NULL
+          │   Update last_scanned_at                │   Update last_scanned_at
+```
+
+### Post-Scan Deletion Reconciliation:
+- After `metaChan` drains and the transaction closes, `database.PruneDeletedFiles()` queries all records within the scan root where `last_scanned_at < scanStartTime`.
+- Each candidate is checked with `os.Lstat()`. If the file no longer exists, it is deleted from the SQLite database in an atomic batch.
+
+---
+
+## 4. Two-Pass Duplicate Detection Pipeline
+
+```
+  [All Files in DB]
+          │
+          ▼
+  ┌────────────────────────────────────────────────────────┐
+  │ Pass 1: Size-Bucket Query                              │
+  │ SELECT size FROM files GROUP BY size HAVING COUNT(*) > 1│
+  └────────────────────────┬───────────────────────────────┘
+                           │
+                           ▼ (Candidate Files Only)
+  ┌────────────────────────────────────────────────────────┐
+  │ Pass 2: Bounded Worker Pool (crypto/sha256)            │
+  │ • Fixed 64 KB streaming buffer per worker              │
+  │ • Concurrent SHA-256 computation                       │
+  │ • Batch update content_hash into SQLite                │
+  └────────────────────────┬───────────────────────────────┘
+                           │
+                           ▼
+  ┌────────────────────────────────────────────────────────┐
+  │ Duplicates Query & Space Savings Aggregation           │
+  │ SELECT content_hash, COUNT(*), SUM(size)               │
+  │ GROUP BY content_hash, size HAVING COUNT(*) > 1        │
+  └────────────────────────────────────────────────────────┘
+```

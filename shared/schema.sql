@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS files (
     extension TEXT,
     content_hash TEXT,
     staleness_score REAL,
+    is_system INTEGER DEFAULT 0,          -- 1 if file resides in OS system paths, 0 for user files
+    category TEXT DEFAULT 'user',         -- 'user', 'system_protected', 'system_log', 'system_cache', 'crash_dump', 'temp'
     last_scanned_at INTEGER NOT NULL
 );
 
@@ -18,6 +20,7 @@ CREATE INDEX IF NOT EXISTS idx_files_size ON files(size);
 CREATE INDEX IF NOT EXISTS idx_files_hash ON files(content_hash);
 CREATE INDEX IF NOT EXISTS idx_files_mtime ON files(mtime);
 CREATE INDEX IF NOT EXISTS idx_files_staleness ON files(staleness_score);
+CREATE INDEX IF NOT EXISTS idx_files_category ON files(category);
 
 CREATE TABLE IF NOT EXISTS scan_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

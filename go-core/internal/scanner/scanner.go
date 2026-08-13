@@ -18,29 +18,17 @@ import (
 // ============================================================================
 // CONCURRENT FILESYSTEM SCANNER & LINUX METADATA EXTRACTOR
 //
-// SYSTEMS PROGRAMMING DEEP DIVE:
-// 1. os.Lstat vs os.Stat:
-//    - os.Stat() follows symbolic links (dereferencing the target). If symlinks
-//      point to ancestor directories (circular links), a recursive walker would
-//      spin in an infinite loop and exhaust stack memory.
-//    - os.Lstat() inspects the link/inode itself WITHOUT following it. We detect
-//      symlinks via (mode & os.ModeSymlink != 0) and safely skip them.
+// INCREMENTAL RE-SCANNING & METADATA CAPTURE (PHASE 4):
+// 1. Safe Symlink Handling (os.Lstat):
+//    - Avoids circular symlink loops by inspecting inodes without following links.
 //
-// 2. Extracting Linux-Specific Inodes and Timestamps via syscall.Stat_t:
-//    - Go's os.FileInfo interface abstracts across Windows, macOS, and Linux.
-//    - On Linux, fileInfo.Sys() exposes the underlying POSIX `struct stat` (syscall.Stat_t).
-//    - stat.Ino: The unique Inode number on the filesystem. Multiple files sharing
-//      the same Inode represent hard links.
-//    - stat.Atim (access time) and stat.Mtim (modification time) provide nanosecond
-//      resolution timestamps from the Linux VFS (Virtual File System).
+// 2. Linux Inode & Timestamp Resolution (syscall.Stat_t):
+//    - Captures nanosecond mtime, atime, and inode numbers directly from the VFS.
 //
-// 3. Concurrency Model: Bounded Worker Pool with Dynamic Work Discovery:
-//    - Challenge: A directory walker discovers new directory tasks dynamically as it runs.
-//    - Naive approach (`go walkDir(...)` for every directory) causes Goroutine Explosion
-//      and crashes with `EMFILE: too many open files` when scanning large trees.
-//    - Our Solution: Fixed N workers (runtime.NumCPU()) reading from a work channel.
-//    - Termination tracking: We maintain an atomic in-flight task counter. When the
-//      in-flight counter drops to zero, all subdirectories have been fully traversed.
+// 3. Scan Timestamp Tagging:
+//    - Every discovered file is tagged with ScanStartTime.
+//    - Unchanged files retain this timestamp during SQLite upsert.
+//    - Stale/deleted files have last_scanned_at < ScanStartTime, allowing precise pruning.
 // ============================================================================
 
 // ScanConfig holds operational parameters for the scanner.
@@ -57,6 +45,8 @@ type Stats struct {
 	DirsScanned  int64         // Count of directories traversed
 	TotalBytes   int64         // Aggregated size of all scanned regular files
 	ErrorsCount  int64         // Non-fatal permission or access errors encountered
+	PrunedCount  int64         // Stale file rows pruned from DB because they were deleted on disk
+	ScanStart    time.Time     // Timestamp when scan initiated
 	Duration     time.Duration // Time elapsed since scan started
 }
 
@@ -78,11 +68,9 @@ func New(cfg ScanConfig) *Scanner {
 }
 
 // Scan traverses the configured root path, streaming discovered FileMetadata into outChan.
-// It blocks until the scan completes or the context is canceled.
 func (s *Scanner) Scan(ctx context.Context, outChan chan<- models.FileMetadata) (Stats, error) {
 	startTime := time.Now()
 
-	// Clean and verify root path
 	absRoot, err := filepath.Abs(s.config.RootPath)
 	if err != nil {
 		return s.stats, fmt.Errorf("invalid root path %q: %w", s.config.RootPath, err)
@@ -96,12 +84,8 @@ func (s *Scanner) Scan(ctx context.Context, outChan chan<- models.FileMetadata) 
 		return s.stats, fmt.Errorf("specified root path %q is not a directory", absRoot)
 	}
 
-	// Work channel for distributing directory paths to workers
-	// Sized with reasonable capacity to prevent worker stalls on broad directory trees
 	dirChan := make(chan string, 10000)
 
-	// activeTasks tracks total directories currently queued or being processed by workers.
-	// When activeTasks hits 0, traversal is complete.
 	var activeTasks int64
 	atomic.AddInt64(&activeTasks, 1)
 	dirChan <- absRoot
@@ -114,7 +98,6 @@ func (s *Scanner) Scan(ctx context.Context, outChan chan<- models.FileMetadata) 
 		workerWg     sync.WaitGroup
 	)
 
-	// Launch bounded pool of worker goroutines
 	for w := 0; w < s.config.NumWorkers; w++ {
 		workerWg.Add(1)
 		go func(workerID int) {
@@ -130,10 +113,10 @@ func (s *Scanner) Scan(ctx context.Context, outChan chan<- models.FileMetadata) 
 						return
 					}
 
-					// Process the directory
 					s.processDirectory(
 						ctx,
 						currentDir,
+						startTime,
 						dirChan,
 						outChan,
 						&activeTasks,
@@ -143,15 +126,11 @@ func (s *Scanner) Scan(ctx context.Context, outChan chan<- models.FileMetadata) 
 						&errorsCount,
 					)
 
-					// Decrement active task counter for this directory
 					remaining := atomic.AddInt64(&activeTasks, -1)
 					if remaining == 0 {
-						// All directories traversed! Close dirChan so workers finish cleanly.
-						// Close is guarded by safe closing logic
 						select {
 						case <-ctx.Done():
 						default:
-							// Use non-blocking close trigger
 							closeWorkQueue(dirChan)
 						}
 					}
@@ -160,7 +139,6 @@ func (s *Scanner) Scan(ctx context.Context, outChan chan<- models.FileMetadata) 
 		}(w)
 	}
 
-	// Wait for all worker goroutines to complete
 	workerWg.Wait()
 
 	s.stats = Stats{
@@ -168,6 +146,7 @@ func (s *Scanner) Scan(ctx context.Context, outChan chan<- models.FileMetadata) 
 		DirsScanned:  atomic.LoadInt64(&dirsScanned),
 		TotalBytes:   atomic.LoadInt64(&totalBytes),
 		ErrorsCount:  atomic.LoadInt64(&errorsCount),
+		ScanStart:    startTime,
 		Duration:     time.Since(startTime),
 	}
 
@@ -179,6 +158,7 @@ func (s *Scanner) Scan(ctx context.Context, outChan chan<- models.FileMetadata) 
 func (s *Scanner) processDirectory(
 	ctx context.Context,
 	dirPath string,
+	scanStartTime time.Time,
 	dirChan chan string,
 	outChan chan<- models.FileMetadata,
 	activeTasks *int64,
@@ -189,26 +169,20 @@ func (s *Scanner) processDirectory(
 ) {
 	atomic.AddInt64(dirsScanned, 1)
 
-	// Open the directory descriptor
 	f, err := os.Open(dirPath)
 	if err != nil {
-		// Gracefully handle permission denied or unreadable directories
 		atomic.AddInt64(errorsCount, 1)
 		return
 	}
 	defer f.Close()
 
-	// ReadDirnames reads entry names without immediately stat-ing everything at once
 	names, err := f.Readdirnames(-1)
 	if err != nil {
 		atomic.AddInt64(errorsCount, 1)
 		return
 	}
 
-	scanTimestamp := time.Now()
-
 	for _, name := range names {
-		// Check context cancellation between items
 		select {
 		case <-ctx.Done():
 			return
@@ -217,7 +191,6 @@ func (s *Scanner) processDirectory(
 
 		fullPath := filepath.Join(dirPath, name)
 
-		// Call os.Lstat (does not follow symlinks)
 		info, err := os.Lstat(fullPath)
 		if err != nil {
 			atomic.AddInt64(errorsCount, 1)
@@ -226,7 +199,6 @@ func (s *Scanner) processDirectory(
 
 		mode := info.Mode()
 
-		// 1. Subdirectory handling: enqueue to worker pool
 		if mode.IsDir() {
 			atomic.AddInt64(activeTasks, 1)
 			select {
@@ -237,18 +209,15 @@ func (s *Scanner) processDirectory(
 			continue
 		}
 
-		// 2. Ignore non-regular files (symlinks, named pipes/FIFOs, sockets, unix devices)
 		if !mode.IsRegular() {
 			continue
 		}
 
-		// 3. Extract Linux POSIX metadata from underlying syscall.Stat_t
-		meta := extractLinuxMetadata(fullPath, info, scanTimestamp)
+		meta := extractLinuxMetadata(fullPath, info, scanStartTime)
 
 		atomic.AddInt64(filesScanned, 1)
 		atomic.AddInt64(totalBytes, meta.Size)
 
-		// Send to SQLite single-writer funnel channel (applies backpressure if channel buffer fills)
 		select {
 		case outChan <- meta:
 		case <-ctx.Done():
@@ -257,14 +226,13 @@ func (s *Scanner) processDirectory(
 	}
 }
 
-// extractLinuxMetadata pulls Inode, Atime, Mtime, and size from os.FileInfo and syscall.Stat_t.
+// extractLinuxMetadata pulls Inode, Atime, Mtime, and classifies system path categories.
 func extractLinuxMetadata(path string, info os.FileInfo, scanTime time.Time) models.FileMetadata {
 	size := info.Size()
 	mtime := info.ModTime()
-	atime := mtime // Default fallback if syscall.Stat_t is unavailable
+	atime := mtime
 	var inode uint64
 
-	// Extract Linux-specific fields from VFS stat structure
 	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
 		inode = uint64(stat.Ino)
 		atime = time.Unix(stat.Atim.Sec, stat.Atim.Nsec)
@@ -272,6 +240,7 @@ func extractLinuxMetadata(path string, info os.FileInfo, scanTime time.Time) mod
 	}
 
 	ext := strings.ToLower(filepath.Ext(path))
+	isSystem, category := ClassifyPath(path, ext)
 
 	return models.FileMetadata{
 		Path:          path,
@@ -280,14 +249,67 @@ func extractLinuxMetadata(path string, info os.FileInfo, scanTime time.Time) mod
 		Atime:         atime,
 		Inode:         inode,
 		Extension:     ext,
+		IsSystem:      isSystem,
+		Category:      category,
 		LastScannedAt: scanTime,
 	}
+}
+
+// ClassifyPath categorizes files into system protected, system log, temp, crash dumps, or user files.
+func ClassifyPath(path string, ext string) (isSystem bool, category models.FileCategory) {
+	cleanPath := filepath.ToSlash(path)
+
+	// 1. Crash Dumps & Application Core Snapshots
+	if strings.Contains(cleanPath, "/var/crash/") ||
+		strings.Contains(cleanPath, "/systemd/coredump/") ||
+		strings.Contains(cleanPath, "/CrashDumps/") ||
+		ext == ".core" || ext == ".dmp" || ext == ".crash" {
+		return true, models.CategoryCrashDump
+	}
+
+	// 2. System and Application Logs
+	if strings.Contains(cleanPath, "/var/log/") ||
+		strings.Contains(cleanPath, "/logs/") ||
+		strings.HasSuffix(cleanPath, ".log") ||
+		strings.Contains(cleanPath, ".log.") {
+		isSys := strings.Contains(cleanPath, "/var/") || strings.Contains(cleanPath, "/usr/") || !strings.Contains(cleanPath, "/home/")
+		return isSys, models.CategorySystemLog
+	}
+
+	// 3. System and Package Caches
+	if strings.Contains(cleanPath, "/var/cache/") || strings.Contains(cleanPath, "/var/spool/") {
+		return true, models.CategorySystemCache
+	}
+
+	// 4. Critical Protected OS Files (Never allow deletion of OS core binaries/libraries)
+	if strings.Contains(cleanPath, "/usr/bin/") || strings.Contains(cleanPath, "/usr/sbin/") ||
+		strings.Contains(cleanPath, "/usr/lib/") || strings.Contains(cleanPath, "/usr/lib64/") ||
+		strings.Contains(cleanPath, "/bin/") || strings.Contains(cleanPath, "/sbin/") ||
+		strings.Contains(cleanPath, "/lib/") || strings.Contains(cleanPath, "/lib64/") ||
+		strings.Contains(cleanPath, "/etc/") || strings.Contains(cleanPath, "/boot/") ||
+		strings.Contains(cleanPath, "/sys/") || strings.Contains(cleanPath, "/proc/") ||
+		strings.Contains(cleanPath, "/dev/") {
+		return true, models.CategorySystemProtected
+	}
+
+	// 5. Temporary files (/tmp, /var/tmp)
+	if strings.HasPrefix(cleanPath, "/tmp/") || strings.Contains(cleanPath, "/var/tmp/") || ext == ".tmp" || ext == ".temp" {
+		return true, models.CategoryTemp
+	}
+
+	// 6. Generic system files under /usr, /opt, /var
+	if strings.Contains(cleanPath, "/usr/") || strings.Contains(cleanPath, "/opt/") || strings.Contains(cleanPath, "/var/") {
+		return true, models.CategorySystemProtected
+	}
+
+	// 7. Default User Files
+	return false, models.CategoryUser
 }
 
 // closeWorkQueue safely drains and closes the directory work channel.
 func closeWorkQueue(ch chan string) {
 	defer func() {
-		_ = recover() // Catch any panic if already closed
+		_ = recover()
 	}()
 	close(ch)
 }
