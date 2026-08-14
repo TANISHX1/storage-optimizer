@@ -1,0 +1,24 @@
+# Binaries
+bin/
+go-core/bin/
+build/bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# SQLite runtime artifacts
+data/*.db-shm
+data/*.db-wal
+
+# Frontend dependencies and builds
+node_modules/
+gui/frontend/node_modules/
+gui/frontend/dist/
+
+# Python virtual environment and cache
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/

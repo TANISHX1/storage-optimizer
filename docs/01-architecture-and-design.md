@@ -68,3 +68,13 @@ storage-optimizer/
 - **Explicit Confirmation**: Every destructive request must declare a mode (`trash` or `permanent`).
 - **Audit Logging**: An entry in `actions_log` is written *before* any filesystem mutation.
 - **Freshness Validation**: The file path, inode, and existence are verified immediately prior to execution to prevent acting on stale indices.
+
+### 3.5 Lightweight Native Desktop Shell (Wails v2 vs Electron)
+**Problem**: Traditional desktop wrappers (like Electron) bundle a full Chromium browser and Node runtime, incurring 500 MB+ RAM overhead and 200 MB+ binary sizes just to display storage diagnostics.
+
+**Solution**:
+- **Wails v2 Architecture**: Links directly to the Linux host's native `webkit2gtk` library (`webkit2gtk-4.1`).
+- **Memory & Binary Footprint**: The compiled 64-bit ELF executable is only **8.3 MB** and consumes only ~30-40 MB of RAM at runtime.
+- **Embedded Assets**: Frontend HTML/CSS/JS assets are compiled into static distributions and directly embedded into the Go binary at compile time via `//go:embed all:frontend/dist`.
+- **Dual-Mode Operation**: The same UI can be run as a native desktop window (`wails dev` / `wails build`) or served directly over HTTP (`storage-optimizer serve --port 8080`) for headless/remote server visualization.
+

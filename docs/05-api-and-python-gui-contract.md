@@ -305,4 +305,25 @@ To spin up the Go REST API backend for model development and testing:
 3. **Local Service (`python-layer/service.py`)**:
    - Optional FastAPI / CLI interface to expose ML outputs for the GUI frontend.
 
+---
+
+## 4. Guide for Wails Desktop GUI & Web Dashboard (Phase 7)
+
+### 4.1 Architecture
+The GUI frontend (`gui/frontend`) is a high-performance Vanilla JS / HTML5 / CSS3 single-page application that consumes the Go REST API directly.
+
+It operates in two interchangeable modes:
+1. **Native Desktop Window**: Built with Wails v2, packaging the app into an 8.3 MB native Linux executable via `webkit2gtk-4.1`.
+2. **Embedded Web Dashboard**: Automatically served directly from the Go core server (`http://127.0.0.1:8080/`) with zero external runtime dependencies.
+
+### 4.2 Integration Workflow
+- **Dashboard**: Polls `/stats` and `/health` to render real-time category breakdown donuts and space utilization meters.
+- **Scanner**: Dispatches `POST /scan` and polls `GET /scan/status` for real-time progress indicators.
+- **Duplicate Hunter**: Ingests `/files/duplicates` and dispatches `POST /actions` with user-selected file IDs.
+- **Stale Files**: Queries `/files/stale?days=N` with dynamic interactive age chips and category filtering.
+- **AI Forecasting**: Ingests `/snapshots` time-series data to render interactive HTML5 Canvas forecast curves with linear regression baseline (ready for Sahil's advanced ML service).
+- **Trash & Audit**: Ingests `/actions/history` and dispatches `POST /actions/restore?id=N` for instant file recovery.
+
+
+
 

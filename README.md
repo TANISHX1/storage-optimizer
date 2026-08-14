@@ -47,8 +47,8 @@ storage-optimizer/
 | **Phase 4** | **Incremental Re-Scan & Deletion Pruning** | ✅ Completed | `mtime`/`size` diffing with automatic hash invalidation on modification, stale row pruning for deleted files, time-series `scan_snapshots` logging, CLI `storage-optimizer snapshots`. |
 | **Phase 5** | **Local HTTP REST API** | ✅ Completed | Standard Go `net/http` REST endpoints on `127.0.0.1:8080` (`/health`, `/stats`, `/scan`, `/scan/status`, `/files/duplicates`, `/files/stale`, `/snapshots`, `/actions/history`, `/actions`, `/actions/restore`), CORS middleware, CLI `storage-optimizer serve`. |
 | **Phase 6** | **Action Layer (Trash, Delete & Restore)** | ✅ Completed | OS Native FreeDesktop.org XDG Trash integration (`~/.local/share/Trash/files` & `.trashinfo`), permanent deletion, system directory & inode safety gates, restore mechanism, and immutable `actions_log` audit trail. |
-| **Phase 7** | **GUI Application Shell (Wails)** | ⏳ **Next Up** | Wails desktop window, sidebar navigation, action confirmation dialogs, wiring to Go HTTP API, placeholder views for Sahil's charts. |
-| **Phase 8** | **Benchmarking & Hardening** | ⏳ Pending | Synthetic directory stress testing (100k+ files), memory leak auditing, SQLite contention verification. |
+| **Phase 7** | **GUI Application Shell (Wails & Web Dashboard)** | ✅ Completed | Wails desktop window & embedded dashboard, sidebar navigation, real-time category donut chart, duplicate cluster hunter, stale pruning, interactive Canvas time-series forecasting, action confirmation modals, and instant restore. |
+| **Phase 8** | **Benchmarking & Hardening** | ⏳ **Next Up** | Synthetic directory stress testing (100k+ files), memory leak auditing, SQLite contention verification. |
 
 ---
 
@@ -123,6 +123,17 @@ go build -o bin/storage-optimizer cmd/storage-optimizer/main.go
 # View immutable audit log of cleanup actions
 ./bin/storage-optimizer actions
 ```
+
+### 8. Run GUI Application (Phase 7)
+```bash
+# Option A: Run Native Desktop Application (Wails v2)
+./gui/build/bin/storage-optimizer-gui
+
+# Option B: Run Embedded Web Dashboard
+./bin/storage-optimizer serve --port 8080
+# Open http://127.0.0.1:8080 in your browser
+```
+
 
 
 ---

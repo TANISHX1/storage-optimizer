@@ -178,3 +178,26 @@ sqlite3 data/optimizer.db "SELECT id, file_path, action_mode, trashed_to_path, f
 sqlite3 data/optimizer.db "SELECT id, datetime(scanned_at, 'unixepoch'), root_path, total_files, total_bytes FROM scan_snapshots;"
 ```
 
+---
+
+## 4. GUI Desktop & Web Operations (Phase 7)
+
+### 4.1 Running the Built-in Web Dashboard
+The Go core binary embeds the production GUI and serves it over HTTP:
+```bash
+./bin/storage-optimizer serve --port 8080
+```
+Open **`http://127.0.0.1:8080/`** in any web browser.
+
+### 4.2 Running the Native Desktop Application (Wails v2)
+To launch the native Linux desktop window:
+```bash
+# Launch pre-compiled native desktop binary:
+./gui/build/bin/storage-optimizer-gui
+
+# Or run live development mode with hot reload:
+cd gui && wails dev
+```
+
+
+

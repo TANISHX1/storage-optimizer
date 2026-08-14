@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -101,7 +102,7 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 }
 
-// registerRoutes wires up all REST API endpoints under /api/v1.
+// registerRoutes wires up all REST API endpoints under /api/v1 and serves GUI on /.
 func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// Health & System Summary
 	mux.HandleFunc("/api/v1/health", s.handleHealth)
@@ -124,7 +125,25 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/actions/history", s.handleActionHistory)
 	mux.HandleFunc("/api/v1/actions/restore", s.handleActionRestore)
 	mux.HandleFunc("/api/v1/actions", s.handleActions)
+
+	// GUI Frontend Static File Serving
+	guiCandidates := []string{
+		"gui/frontend/dist",
+		"../gui/frontend/dist",
+		"/home/blazex/Documents/git/storage-optimizer/gui/frontend/dist",
+	}
+
+	for _, dir := range guiCandidates {
+		if abs, err := filepath.Abs(dir); err == nil {
+			if info, err := os.Stat(abs); err == nil && info.IsDir() {
+				log.Printf("[API] Serving GUI Dashboard from %s at http://127.0.0.1:%d/\n", abs, s.port)
+				mux.Handle("/", http.FileServer(http.Dir(abs)))
+				break
+			}
+		}
+	}
 }
+
 
 // ============================================================================
 // HANDLER IMPLEMENTATIONS
