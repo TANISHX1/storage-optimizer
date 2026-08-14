@@ -104,22 +104,29 @@ In long-running operations and recurring scans, re-scanning unchanged files is r
           │
           ▼
   ┌────────────────────────────────────────────────────────┐
-  │ Pass 1: Size-Bucket Query                              │
+  │ Pass 1: Size-Bucket Query (Candidate Filtering)        │
   │ SELECT size FROM files GROUP BY size HAVING COUNT(*) > 1│
   └────────────────────────┬───────────────────────────────┘
                            │
-                           ▼ (Candidate Files Only)
+                           ▼ (Candidate Files Only - Excludes 90%+ Uniques)
   ┌────────────────────────────────────────────────────────┐
-  │ Pass 2: Bounded Worker Pool (crypto/sha256)            │
-  │ • Fixed 64 KB streaming buffer per worker              │
-  │ • Concurrent SHA-256 computation                       │
+  │ Pass 2: Bounded Worker Pool (Streaming SHA-256)        │
+  │ • Fixed 64 KB RAM streaming buffer per worker          │
+  │ • Hardware-accelerated 64-byte block compression loop  │
   │ • Batch update content_hash into SQLite                │
   └────────────────────────┬───────────────────────────────┘
                            │
                            ▼
   ┌────────────────────────────────────────────────────────┐
-  │ Duplicates Query & Space Savings Aggregation           │
-  │ SELECT content_hash, COUNT(*), SUM(size)               │
-  │ GROUP BY content_hash, size HAVING COUNT(*) > 1        │
+  │ Duplicates Query & Inode Hardlink Filtering            │
+  │ • Matches identical (size, content_hash)               │
+  │ • Inodes compared: Hardlinks excluded from waste total │
+  │ • Aggregates reclaimable wasted storage                │
   └────────────────────────────────────────────────────────┘
 ```
+
+### Key Principles:
+1. **Pass 1 Never Declares Duplicates**: It only isolates candidates that share matching sizes.
+2. **Pass 2 Confirms Byte-Level Identity**: Only matching SHA-256 fingerprints prove identical byte contents.
+3. **Hardlink Handling**: Files with identical Inodes reference the same physical disk blocks and are recognized accordingly.
+

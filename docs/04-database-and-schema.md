@@ -51,15 +51,14 @@ Time-series growth metrics used by the Python regression and forecasting layer.
 | `root_path` | `TEXT` | `NOT NULL` | Target root path scanned |
 
 ### 2.3 `actions_log` Table
-Immutable audit trail for file cleanup actions (Phase 6).
+Immutable audit trail for file cleanup actions (FreeDesktop.org XDG Trash & Permanent Delete).
 
 | Column | Type | Constraints | Description |
 | :--- | :--- | :--- | :--- |
 | `id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | Action audit record ID |
-| `file_id` | `INTEGER` | `NOT NULL` | ID of the target file |
 | `file_path` | `TEXT` | `NOT NULL` | Path of file at action execution |
+| `action_mode` | `TEXT` | `NOT NULL` | Action mode: `'trash'` or `'permanent'` |
+| `trashed_to_path` | `TEXT` | `NULLABLE` | Destination path in `~/.local/share/Trash/files/` (NULL for permanent) |
 | `file_size` | `INTEGER` | `NOT NULL` | Size in bytes of freed storage |
-| `action_type` | `TEXT` | `NOT NULL` | Action mode: `'trash'` or `'permanent'` |
-| `performed_at` | `INTEGER` | `NOT NULL` | Timestamp of action execution |
-| `status` | `TEXT` | `NOT NULL` | Result: `'success'` or `'failed'` |
-| `error_message` | `TEXT` | `NULLABLE` | Error description if status is failed |
+| `performed_at` | `INTEGER` | `NOT NULL` | Timestamp of action execution (Unix seconds) |
+

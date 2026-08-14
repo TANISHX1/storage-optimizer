@@ -91,6 +91,45 @@ type StaleReport struct {
 	Duration      time.Duration  `json:"duration"`       // Computation duration
 }
 
+// CategoryBreakdown represents aggregated file counts and bytes for a single category.
+type CategoryBreakdown struct {
+	Category   FileCategory `json:"category"`
+	TotalFiles int64        `json:"total_files"`
+	TotalBytes int64        `json:"total_bytes"`
+}
+
+// StorageStats represents overall storage analysis metrics for dashboard views.
+type StorageStats struct {
+	TotalFiles       int64               `json:"total_files"`
+	TotalBytes       int64               `json:"total_bytes"`
+	TotalDuplicates  int                 `json:"total_duplicates"`
+	TotalWastedBytes int64               `json:"total_wasted_bytes"`
+	TotalSnapshots   int                 `json:"total_snapshots"`
+	Categories       []CategoryBreakdown `json:"categories"`
+}
+
+// ScanRequest defines the payload for initiating a directory scan via HTTP API.
+type ScanRequest struct {
+	Path    string `json:"path"`
+	Full    bool   `json:"full"`
+	Workers int    `json:"workers"`
+	NoPrune bool   `json:"no_prune"`
+}
+
+// ScanStatus represents the live or last-completed scan status.
+type ScanStatus struct {
+	Status       string     `json:"status"` // "idle", "scanning", "completed", "failed"
+	TargetPath   string     `json:"target_path"`
+	StartedAt    time.Time  `json:"started_at"`
+	CompletedAt  *time.Time `json:"completed_at,omitempty"`
+	FilesScanned int64      `json:"files_scanned"`
+	DirsScanned  int64      `json:"dirs_scanned"`
+	TotalBytes   int64      `json:"total_bytes"`
+	PrunedRows   int64      `json:"pruned_rows"`
+	Error        string     `json:"error,omitempty"`
+	SnapshotID   int64      `json:"snapshot_id,omitempty"`
+}
+
 // ActionMode represents the deletion strategy requested by the user.
 type ActionMode string
 
@@ -109,3 +148,20 @@ type ActionLog struct {
 	FileSize      int64      `json:"file_size"`       // Size of affected file
 	PerformedAt   time.Time  `json:"performed_at"`    // Timestamp of execution
 }
+
+// ActionRequest defines the payload for executing a cleanup action.
+type ActionRequest struct {
+	IDs  []int64    `json:"ids"`
+	Mode ActionMode `json:"mode"` // "trash" or "permanent"
+}
+
+// ActionResponse summarizes the result of an executed cleanup action.
+type ActionResponse struct {
+	Success        bool        `json:"success"`
+	Mode           ActionMode  `json:"mode"`
+	ProcessedCount int         `json:"processed_count"`
+	FreedBytes     int64       `json:"freed_bytes"`
+	Actions        []ActionLog `json:"actions"`
+	Error          string      `json:"error,omitempty"`
+}
+

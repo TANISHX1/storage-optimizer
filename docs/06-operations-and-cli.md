@@ -1,6 +1,6 @@
 # 06 — Operations & CLI Reference
 
-This document provides instructions on building, running, testing, and troubleshooting the Storage Optimizer core.
+This document provides instructions on building, running, testing, and troubleshooting the Storage Optimizer core and its HTTP REST API service.
 
 ---
 
@@ -22,7 +22,46 @@ The compiled binary will be placed at `go-core/bin/storage-optimizer`.
 
 ## 2. CLI Command Reference
 
-### 2.1 Scanning a Directory Tree (`scan`)
+### 2.1 Running the HTTP REST API Server (`serve` / `api`)
+Starts the high-performance local HTTP server on `127.0.0.1:8080` (or custom port). Unblocks GUI frontend and Sahil's Python forecasting microservice.
+
+```bash
+# Start API server on default port 8080
+./bin/storage-optimizer serve
+
+# Start API server on custom port 8085 with custom database
+./bin/storage-optimizer serve --port 8085 --db ../data/optimizer.db
+```
+
+#### API Curl Quick Reference:
+```bash
+# Health check
+curl -s http://127.0.0.1:8080/api/v1/health | jq .
+
+# High-level storage stats & category breakdowns
+curl -s http://127.0.0.1:8080/api/v1/stats | jq .
+
+# Trigger background directory scan
+curl -s -X POST http://127.0.0.1:8080/api/v1/scan \
+  -H "Content-Type: application/json" \
+  -d '{"path": "/home/user/projects", "workers": 8}' | jq .
+
+# Poll scan status
+curl -s http://127.0.0.1:8080/api/v1/scan/status | jq .
+
+# Duplicate file groups & reclaimable space
+curl -s http://127.0.0.1:8080/api/v1/files/duplicates | jq .
+
+# Stale files untouched for 60+ days
+curl -s "http://127.0.0.1:8080/api/v1/files/stale?days=60&limit=50" | jq .
+
+# Historical scan snapshots
+curl -s "http://127.0.0.1:8080/api/v1/snapshots?limit=20" | jq .
+```
+
+---
+
+### 2.2 Scanning a Directory Tree (`scan`)
 Recursively traverses filesystem paths using bounded worker pools, extracts Linux Inode/mtime/atime stats, classifies system vs user assets, and prunes records for deleted files.
 
 ```bash
@@ -54,7 +93,7 @@ Recursively traverses filesystem paths using bounded worker pools, extracts Linu
 
 ---
 
-### 2.2 Finding Duplicate Files (`duplicates`)
+### 2.3 Finding Duplicate Files (`duplicates`)
 Executes an I/O-optimized two-pass deduplication algorithm (Size Bucketing $\rightarrow$ Streaming SHA-256 in 64 KB buffers):
 
 ```bash
@@ -66,7 +105,7 @@ Executes an I/O-optimized two-pass deduplication algorithm (Size Bucketing $\rig
 
 ---
 
-### 2.3 Ranking Stale & Unused Files (`stale`)
+### 2.4 Ranking Stale & Unused Files (`stale`)
 Ranks inactive files based on exponential age decay, access/modification dynamics, and system path heuristic weights:
 
 ```bash
@@ -79,23 +118,44 @@ Ranks inactive files based on exponential age decay, access/modification dynamic
 
 ---
 
-### 2.4 Time-Series Snapshots (`snapshots`)
+### 2.5 Time-Series Snapshots (`snapshots`)
 Displays historical scan snapshots recorded across scan runs:
 
 ```bash
 ./bin/storage-optimizer snapshots
 ```
 
-#### Example Output:
-```text
-=== Historical Scan Snapshots (Time-Series for Python Layer) ===
-• Total Snapshots Recorded: 12
+---
 
-ID      TIMESTAMP             FILES         STORAGE         ROOT PATH
-----------------------------------------------------------------------------------------
-#11     2026-08-13 23:09:42   109041        1.43 GB         /home/blazex/Documents/git/seat-allocation-sys
-#12     2026-08-13 23:10:04   201           42.56 MB        /tmp
-----------------------------------------------------------------------------------------
+### 2.6 Executing Safe File Cleanup (`delete`)
+Executes user-confirmed cleanup actions with strict pre-mutation safety gating (category protection, path blocks, disk inode verification):
+
+```bash
+# Move files to FreeDesktop.org OS Native Trash (Default & Recommended)
+./bin/storage-optimizer delete --ids 104,105 --mode trash
+
+# Permanently destroy files (logs audit record before os.Remove)
+./bin/storage-optimizer delete --ids 106 --mode permanent
+```
+
+---
+
+### 2.7 Restoring Trashed Files (`restore`)
+Restores a previously trashed file back to its original filesystem path and re-indexes it into SQLite:
+
+```bash
+# Restore file associated with Action Log #1
+./bin/storage-optimizer restore --id 1
+```
+
+---
+
+### 2.8 Viewing Cleanup Audit History (`actions`)
+Displays an immutable audit log of all cleanup operations performed by the engine:
+
+```bash
+./bin/storage-optimizer actions
+./bin/storage-optimizer actions --limit 50
 ```
 
 ---
@@ -111,6 +171,10 @@ sqlite3 data/optimizer.db "SELECT id, path, size, category FROM files ORDER BY s
 # Count files by category
 sqlite3 data/optimizer.db "SELECT category, COUNT(*), SUM(size) FROM files GROUP BY category;"
 
+# Inspect cleanup audit logs
+sqlite3 data/optimizer.db "SELECT id, file_path, action_mode, trashed_to_path, file_size, datetime(performed_at, 'unixepoch') FROM actions_log;"
+
 # Inspect historical snapshots
 sqlite3 data/optimizer.db "SELECT id, datetime(scanned_at, 'unixepoch'), root_path, total_files, total_bytes FROM scan_snapshots;"
 ```
+

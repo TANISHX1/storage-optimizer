@@ -8,9 +8,13 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
+	"storage-optimizer/go-core/internal/action"
+	"storage-optimizer/go-core/internal/api"
 	"storage-optimizer/go-core/internal/db"
 	"storage-optimizer/go-core/internal/dedup"
 	"storage-optimizer/go-core/internal/models"
@@ -27,7 +31,9 @@ import (
 //       ├── "duplicates" -> [DB Size Buckets (Pass 1)] -> [SHA-256 Workers (Pass 2)] -> [Dedup Report]
 //       ├── "stale"      -> [Staleness Scoring Engine] -> [mtime/atime Decay Matrix] -> [Stale Report]
 //       ├── "snapshots"  -> [DB Snapshot History] -> [Time-Series Metric Log] (Phase 4)
-//       └── "delete"     -> [Action & Audit Engine] (Phase 6)
+//       ├── "serve"      -> [HTTP REST API Server] (Phase 5)
+//       ├── "delete"     -> [Action & Audit Engine: XDG Trash / Perm Delete] (Phase 6)
+//       └── "restore"    -> [Action Engine: Restore from XDG Trash] (Phase 6)
 // ============================================================================
 
 // ANSI color escape codes for terminal feedback
@@ -58,8 +64,14 @@ func main() {
 		handleStale(os.Args[2:])
 	case "snapshots":
 		handleSnapshots(os.Args[2:])
+	case "serve", "api":
+		handleServe(os.Args[2:])
 	case "delete":
-		fmt.Println(Yellow + "[Phase 6] Action execution CLI will be activated in Phase 6." + Reset)
+		handleDelete(os.Args[2:])
+	case "restore":
+		handleRestore(os.Args[2:])
+	case "actions", "history":
+		handleActionsLog(os.Args[2:])
 	case "help", "--help", "-h":
 		printUsage()
 	default:
@@ -73,12 +85,19 @@ func printUsage() {
 	fmt.Println(Bold + "Intelligent Storage Optimizer (Linux)" + Reset)
 	fmt.Println("Usage: storage-optimizer <command> [options]")
 	fmt.Println("\nCommands:")
+	fmt.Println("  serve / api          Start local HTTP REST API server on 127.0.0.1:8080 (Phase 5)")
 	fmt.Println("  scan <path>          Scan directory tree, prune deleted rows, and update metadata")
 	fmt.Println("  duplicates           Identify duplicate files and calculate wasted disk space")
 	fmt.Println("  stale --days N       Identify stale files, forgotten logs, temp junk & crash snapshots")
 	fmt.Println("  snapshots            View historical scan snapshots for time-series growth tracking")
-	fmt.Println("  delete --ids ...     Execute user-confirmed file cleanup (Phase 6)")
+	fmt.Println("  delete --ids ...     Execute user-confirmed file cleanup (XDG Trash or Permanent)")
+	fmt.Println("  restore --id N       Restore a previously trashed file back to its original path")
+	fmt.Println("  actions              View immutable audit log history of past cleanup actions")
 	fmt.Println("\nGlobal Flags:")
+	fmt.Println("  --mode [trash|perm]  Deletion strategy ('trash' moves to OS XDG Trash, 'permanent' destroys)")
+	fmt.Println("  --ids 1,2,3          Comma-separated list of file IDs to mutate")
+	fmt.Println("  --id N               Action log ID to restore")
+	fmt.Println("  --port N             Port for HTTP REST API server (default: 8080)")
 	fmt.Println("  --workers N          Number of concurrent workers (default: NumCPU)")
 	fmt.Println("  --db <path>          Path to SQLite database (default: ../data/optimizer.db)")
 	fmt.Println("  --schema <path>      Path to shared/schema.sql (default: ../shared/schema.sql)")
@@ -483,6 +502,268 @@ func findDefaultPath(relPath string) string {
 	return relPath
 }
 
+func handleServe(args []string) {
+	serveCmd := flag.NewFlagSet("serve", flag.ExitOnError)
+	portFlag := serveCmd.Int("port", 8080, "Port to listen on for HTTP REST API")
+	dbFlag := serveCmd.String("db", "", "Path to SQLite database file")
+	schemaFlag := serveCmd.String("schema", "", "Path to schema.sql file")
+
+	if err := serveCmd.Parse(args); err != nil {
+		fmt.Println(Red + "Error parsing flags: " + err.Error() + Reset)
+		os.Exit(1)
+	}
+
+	dbPath := *dbFlag
+	if dbPath == "" {
+		dbPath = findDefaultPath("data/optimizer.db")
+	}
+
+	schemaPath := *schemaFlag
+	if schemaPath == "" {
+		schemaPath = findDefaultPath("shared/schema.sql")
+	}
+
+	ctx, cancel := setupSignalContext()
+	defer cancel()
+
+	fmt.Printf(Bold+Cyan+"==> Initializing SQLite Database:"+Reset+" %s\n", dbPath)
+	database, err := db.Open(dbPath, schemaPath)
+	if err != nil {
+		fmt.Printf(Red+"[FATAL] Failed to initialize SQLite database: %v\n"+Reset, err)
+		os.Exit(1)
+	}
+	defer database.Close()
+
+	server := api.New(database, *portFlag)
+
+	fmt.Println("\n" + Bold + Green + "=== Storage Optimizer HTTP REST API Server (Phase 5) ===" + Reset)
+	fmt.Printf("• Base Endpoint:     %shttp://127.0.0.1:%d/api/v1%s\n", Bold+Cyan, *portFlag, Reset)
+	fmt.Println("• Active Endpoints:")
+	fmt.Println("  ├─ GET  /api/v1/health             -> Health check and service status")
+	fmt.Println("  ├─ GET  /api/v1/stats              -> Storage overview & category breakdowns")
+	fmt.Println("  ├─ POST /api/v1/scan               -> Start async background directory scan")
+	fmt.Println("  ├─ GET  /api/v1/scan/status        -> Poll real-time / last-completed scan status")
+	fmt.Println("  ├─ GET  /api/v1/files/duplicates   -> Find duplicate clusters and wasted bytes")
+	fmt.Println("  ├─ GET  /api/v1/files/stale        -> Rank inactive/stale files (query: days, min_score, limit)")
+	fmt.Println("  ├─ GET  /api/v1/snapshots          -> Time-series snapshots for Sahil's Python forecasting")
+	fmt.Println("\n" + Gray + "Press Ctrl+C to stop the API server." + Reset)
+
+	if err := server.Start(ctx); err != nil {
+		fmt.Printf(Red+"[API ERROR] %v\n"+Reset, err)
+	}
+}
+
+func handleDelete(args []string) {
+	delCmd := flag.NewFlagSet("delete", flag.ExitOnError)
+	idsFlag := delCmd.String("ids", "", "Comma-separated file record IDs to delete (e.g. --ids 42,98)")
+	modeFlag := delCmd.String("mode", "trash", "Deletion strategy: 'trash' (moves to OS XDG Trash) or 'permanent' (os.Remove)")
+	dbFlag := delCmd.String("db", "", "Path to SQLite database file")
+	schemaFlag := delCmd.String("schema", "", "Path to schema.sql file")
+
+	if err := delCmd.Parse(args); err != nil {
+		fmt.Println(Red + "Error parsing flags: " + err.Error() + Reset)
+		os.Exit(1)
+	}
+
+	if *idsFlag == "" {
+		fmt.Println(Red + "Error: Missing required --ids flag. Example: storage-optimizer delete --ids 12,15 --mode trash" + Reset)
+		os.Exit(1)
+	}
+
+	rawIDs := strings.Split(*idsFlag, ",")
+	var ids []int64
+	for _, raw := range rawIDs {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			continue
+		}
+		id, err := strconv.ParseInt(trimmed, 10, 64)
+		if err != nil {
+			fmt.Printf(Red+"Error: invalid ID %q: must be integer\n"+Reset, trimmed)
+			os.Exit(1)
+		}
+		ids = append(ids, id)
+	}
+
+	if len(ids) == 0 {
+		fmt.Println(Yellow + "No valid IDs provided." + Reset)
+		return
+	}
+
+	mode := models.ActionMode(*modeFlag)
+	if mode != models.ActionModeTrash && mode != models.ActionModePermanent {
+		fmt.Printf(Red+"Error: invalid mode %q. Choose 'trash' or 'permanent'.\n"+Reset, *modeFlag)
+		os.Exit(1)
+	}
+
+	dbPath := *dbFlag
+	if dbPath == "" {
+		dbPath = findDefaultPath("data/optimizer.db")
+	}
+
+	schemaPath := *schemaFlag
+	if schemaPath == "" {
+		schemaPath = findDefaultPath("shared/schema.sql")
+	}
+
+	ctx, cancel := setupSignalContext()
+	defer cancel()
+
+	database, err := db.Open(dbPath, schemaPath)
+	if err != nil {
+		fmt.Printf(Red+"[FATAL] Failed to open SQLite database: %v\n"+Reset, err)
+		os.Exit(1)
+	}
+	defer database.Close()
+
+	engine := action.New(database)
+	fmt.Printf(Bold+Cyan+"==> Executing Action:"+Reset+" %d files -> Mode: %s%s%s\n", len(ids), Bold+Yellow, mode, Reset)
+
+	resp, err := engine.Execute(ctx, models.ActionRequest{
+		IDs:  ids,
+		Mode: mode,
+	})
+	if err != nil {
+		fmt.Printf(Red+"[ERROR] Cleanup action failed: %v\n"+Reset, err)
+		os.Exit(1)
+	}
+
+	fmt.Println("\n" + Bold + Green + "=== Cleanup Action Execution Summary ===" + Reset)
+	fmt.Printf("• Mode:            %s\n", resp.Mode)
+	fmt.Printf("• Processed Files: %d / %d\n", resp.ProcessedCount, len(ids))
+	fmt.Printf("• Reclaimed Space: %s%s%s (%d bytes)\n", Bold+Green, formatBytes(resp.FreedBytes), Reset, resp.FreedBytes)
+
+	if len(resp.Actions) > 0 {
+		fmt.Println("\n" + Bold + "Action Log Entries:" + Reset)
+		fmt.Println(Gray + "----------------------------------------------------------------------------------------" + Reset)
+		for _, a := range resp.Actions {
+			if a.ActionMode == models.ActionModeTrash && a.TrashedToPath != nil {
+				fmt.Printf("• [Action #%d] %s -> %s (Size: %s)\n", a.ID, a.FilePath, *a.TrashedToPath, formatBytes(a.FileSize))
+			} else {
+				fmt.Printf("• [Action #%d] %s -> PERMANENTLY REMOVED (Size: %s)\n", a.ID, a.FilePath, formatBytes(a.FileSize))
+			}
+		}
+		fmt.Println(Gray + "----------------------------------------------------------------------------------------" + Reset)
+	}
+}
+
+func handleRestore(args []string) {
+	restoreCmd := flag.NewFlagSet("restore", flag.ExitOnError)
+	idFlag := restoreCmd.Int64("id", 0, "Action log ID to restore from XDG Trash")
+	dbFlag := restoreCmd.String("db", "", "Path to SQLite database file")
+	schemaFlag := restoreCmd.String("schema", "", "Path to schema.sql file")
+
+	if err := restoreCmd.Parse(args); err != nil {
+		fmt.Println(Red + "Error parsing flags: " + err.Error() + Reset)
+		os.Exit(1)
+	}
+
+	if *idFlag <= 0 {
+		fmt.Println(Red + "Error: Missing or invalid --id flag. Example: storage-optimizer restore --id 12" + Reset)
+		os.Exit(1)
+	}
+
+	dbPath := *dbFlag
+	if dbPath == "" {
+		dbPath = findDefaultPath("data/optimizer.db")
+	}
+
+	schemaPath := *schemaFlag
+	if schemaPath == "" {
+		schemaPath = findDefaultPath("shared/schema.sql")
+	}
+
+	ctx, cancel := setupSignalContext()
+	defer cancel()
+
+	database, err := db.Open(dbPath, schemaPath)
+	if err != nil {
+		fmt.Printf(Red+"[FATAL] Failed to open SQLite database: %v\n"+Reset, err)
+		os.Exit(1)
+	}
+	defer database.Close()
+
+	engine := action.New(database)
+	fmt.Printf(Bold+Cyan+"==> Restoring File from XDG Trash:"+Reset+" Action Log #%d\n", *idFlag)
+
+	restoredLog, err := engine.Restore(ctx, *idFlag)
+	if err != nil {
+		fmt.Printf(Red+"[ERROR] Restoration failed: %v\n"+Reset, err)
+		os.Exit(1)
+	}
+
+	fmt.Println("\n" + Bold + Green + "=== File Restored Successfully ===" + Reset)
+	fmt.Printf("• Original Path: %s%s%s\n", Bold+Cyan, restoredLog.FilePath, Reset)
+	fmt.Printf("• File Size:     %s (%d bytes)\n", formatBytes(restoredLog.FileSize), restoredLog.FileSize)
+	fmt.Printf("• Restored At:   %s\n", time.Now().Format("2006-01-02 15:04:05"))
+	fmt.Println(Green + "✨ The file has been restored to disk and re-indexed in the database index." + Reset)
+}
+
+func handleActionsLog(args []string) {
+	logCmd := flag.NewFlagSet("actions", flag.ExitOnError)
+	limitFlag := logCmd.Int("limit", 25, "Maximum number of audit logs to display")
+	dbFlag := logCmd.String("db", "", "Path to SQLite database file")
+	schemaFlag := logCmd.String("schema", "", "Path to schema.sql file")
+
+	if err := logCmd.Parse(args); err != nil {
+		fmt.Println(Red + "Error parsing flags: " + err.Error() + Reset)
+		os.Exit(1)
+	}
+
+	dbPath := *dbFlag
+	if dbPath == "" {
+		dbPath = findDefaultPath("data/optimizer.db")
+	}
+
+	schemaPath := *schemaFlag
+	if schemaPath == "" {
+		schemaPath = findDefaultPath("shared/schema.sql")
+	}
+
+	ctx, cancel := setupSignalContext()
+	defer cancel()
+
+	database, err := db.Open(dbPath, schemaPath)
+	if err != nil {
+		fmt.Printf(Red+"[FATAL] Failed to open SQLite database: %v\n"+Reset, err)
+		os.Exit(1)
+	}
+	defer database.Close()
+
+	logs, err := database.GetActionLogs(ctx, *limitFlag)
+	if err != nil {
+		fmt.Printf(Red+"[ERROR] Failed to query action logs: %v\n"+Reset, err)
+		os.Exit(1)
+	}
+
+	fmt.Println("\n" + Bold + Green + "=== Immutable Cleanup Audit Logs ===" + Reset)
+	fmt.Printf("• Total Action Records: %d\n\n", len(logs))
+
+	if len(logs) == 0 {
+		fmt.Println(Yellow + "No file cleanup actions executed yet." + Reset)
+		return
+	}
+
+	fmt.Printf(Bold+"%-6s  %-10s  %-12s  %-20s  %s\n"+Reset, "ID", "MODE", "SIZE", "TIMESTAMP", "FILE PATH")
+	fmt.Println(Gray + "----------------------------------------------------------------------------------------------------" + Reset)
+
+	for _, a := range logs {
+		modeBadge := Green + "[TRASH]" + Reset
+		if a.ActionMode == models.ActionModePermanent {
+			modeBadge = Red + "[PERM]" + Reset
+		}
+
+		fmt.Printf("#%-5d  %-10s  %-12s  %-20s  %s\n",
+			a.ID,
+			modeBadge,
+			formatBytes(a.FileSize),
+			a.PerformedAt.Format("2006-01-02 15:04:05"),
+			a.FilePath,
+		)
+	}
+	fmt.Println(Gray + "----------------------------------------------------------------------------------------------------" + Reset)
+}
+
 func formatBytes(b int64) string {
 	const unit = 1024
 	if b < unit {
@@ -495,3 +776,5 @@ func formatBytes(b int64) string {
 	}
 	return fmt.Sprintf("%.2f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
+
+

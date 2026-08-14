@@ -796,3 +796,260 @@ func (d *DB) GetTotalStats(ctx context.Context) (totalFiles int64, totalBytes in
 	err = row.Scan(&totalFiles, &totalBytes)
 	return
 }
+
+// GetCategoryBreakdown returns file counts and storage size grouped by category.
+func (d *DB) GetCategoryBreakdown(ctx context.Context) ([]models.CategoryBreakdown, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	query := `
+	SELECT COALESCE(category, 'user'), COUNT(*), COALESCE(SUM(size), 0)
+	FROM files
+	GROUP BY category
+	ORDER BY SUM(size) DESC;
+	`
+	rows, err := d.Conn.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query category breakdown: %w", err)
+	}
+	defer rows.Close()
+
+	var list []models.CategoryBreakdown
+	for rows.Next() {
+		var cat string
+		var count, bytes int64
+		if err := rows.Scan(&cat, &count, &bytes); err != nil {
+			return nil, fmt.Errorf("failed to scan category breakdown row: %w", err)
+		}
+		list = append(list, models.CategoryBreakdown{
+			Category:   models.FileCategory(cat),
+			TotalFiles: count,
+			TotalBytes: bytes,
+		})
+	}
+	return list, rows.Err()
+}
+
+// GetStorageStats returns a high-level summary of the indexed storage state for dashboards.
+func (d *DB) GetStorageStats(ctx context.Context) (*models.StorageStats, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	stats := &models.StorageStats{}
+
+	// Total files and bytes
+	row := d.Conn.QueryRowContext(ctx, "SELECT COUNT(*), COALESCE(SUM(size), 0) FROM files")
+	if err := row.Scan(&stats.TotalFiles, &stats.TotalBytes); err != nil {
+		return nil, fmt.Errorf("failed to query file totals: %w", err)
+	}
+
+	// Total duplicate groups & wasted bytes
+	dupRow := d.Conn.QueryRowContext(ctx, `
+		SELECT COUNT(*), COALESCE(SUM(wasted), 0) FROM (
+			SELECT (COUNT(*) - 1) * size as wasted
+			FROM files
+			WHERE content_hash IS NOT NULL AND content_hash != ''
+			GROUP BY content_hash, size
+			HAVING COUNT(*) > 1
+		);
+	`)
+	_ = dupRow.Scan(&stats.TotalDuplicates, &stats.TotalWastedBytes)
+
+	// Total snapshots
+	snapRow := d.Conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM scan_snapshots")
+	_ = snapRow.Scan(&stats.TotalSnapshots)
+
+	// Category breakdown
+	catList, err := d.GetCategoryBreakdown(ctx)
+	if err == nil {
+		stats.Categories = catList
+	}
+
+	return stats, nil
+}
+
+// GetFilesByIDs retrieves metadata for specific file IDs.
+func (d *DB) GetFilesByIDs(ctx context.Context, ids []int64) ([]models.FileMetadata, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	var results []models.FileMetadata
+	for _, id := range ids {
+		f, err := d.getFileByIDLocked(ctx, id)
+		if err == nil && f != nil {
+			results = append(results, *f)
+		}
+	}
+	return results, nil
+}
+
+// GetFileByID retrieves a single file record by ID.
+func (d *DB) GetFileByID(ctx context.Context, id int64) (*models.FileMetadata, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.getFileByIDLocked(ctx, id)
+}
+
+func (d *DB) getFileByIDLocked(ctx context.Context, id int64) (*models.FileMetadata, error) {
+	query := `
+	SELECT id, path, size, mtime, atime, inode, extension, COALESCE(content_hash, ''), COALESCE(staleness_score, 0.0), is_system, category, last_scanned_at
+	FROM files
+	WHERE id = ?;
+	`
+	row := d.Conn.QueryRowContext(ctx, query, id)
+
+	var f models.FileMetadata
+	var mtimeSec, atimeSec, scannedSec int64
+	var hash, category string
+	var isSysInt int
+
+	err := row.Scan(
+		&f.ID,
+		&f.Path,
+		&f.Size,
+		&mtimeSec,
+		&atimeSec,
+		&f.Inode,
+		&f.Extension,
+		&hash,
+		&f.StalenessScore,
+		&isSysInt,
+		&category,
+		&scannedSec,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to scan file row %d: %w", id, err)
+	}
+
+	f.Mtime = time.Unix(mtimeSec, 0)
+	f.Atime = time.Unix(atimeSec, 0)
+	f.LastScannedAt = time.Unix(scannedSec, 0)
+	f.ContentHash = hash
+	f.IsSystem = isSysInt == 1
+	f.Category = models.FileCategory(category)
+
+	return &f, nil
+}
+
+// DeleteFileByID purges a single file record from the files table.
+func (d *DB) DeleteFileByID(ctx context.Context, id int64) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	_, err := d.Conn.ExecContext(ctx, "DELETE FROM files WHERE id = ?", id)
+	return err
+}
+
+// LogAction inserts an immutable record into actions_log before or after a filesystem mutation.
+func (d *DB) LogAction(ctx context.Context, filePath string, mode models.ActionMode, trashedToPath *string, fileSize int64) (int64, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	query := `
+	INSERT INTO actions_log (file_path, action_mode, trashed_to_path, file_size, performed_at)
+	VALUES (?, ?, ?, ?, ?);
+	`
+	now := time.Now().Unix()
+	var tPath sql.NullString
+	if trashedToPath != nil {
+		tPath.String = *trashedToPath
+		tPath.Valid = true
+	}
+
+	res, err := d.Conn.ExecContext(ctx, query, filePath, string(mode), tPath, fileSize, now)
+	if err != nil {
+		return 0, fmt.Errorf("failed to record action log: %w", err)
+	}
+	return res.LastInsertId()
+}
+
+// GetActionLogByID retrieves a specific action log record.
+func (d *DB) GetActionLogByID(ctx context.Context, id int64) (*models.ActionLog, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	query := `
+	SELECT id, file_path, action_mode, trashed_to_path, file_size, performed_at
+	FROM actions_log
+	WHERE id = ?;
+	`
+	row := d.Conn.QueryRowContext(ctx, query, id)
+
+	var l models.ActionLog
+	var trashedPath sql.NullString
+	var perfSec int64
+	var mode string
+
+	if err := row.Scan(&l.ID, &l.FilePath, &mode, &trashedPath, &l.FileSize, &perfSec); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to scan action log row: %w", err)
+	}
+	l.ActionMode = models.ActionMode(mode)
+	if trashedPath.Valid {
+		l.TrashedToPath = &trashedPath.String
+	}
+	l.PerformedAt = time.Unix(perfSec, 0)
+	return &l, nil
+}
+
+// DeleteActionLog removes an action log entry (e.g. after successful restoration).
+func (d *DB) DeleteActionLog(ctx context.Context, id int64) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	_, err := d.Conn.ExecContext(ctx, "DELETE FROM actions_log WHERE id = ?", id)
+	return err
+}
+
+// GetActionLogs queries the immutable audit log of cleanup actions.
+func (d *DB) GetActionLogs(ctx context.Context, limit int) ([]models.ActionLog, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	if limit <= 0 {
+		limit = 50
+	}
+
+	query := `
+	SELECT id, file_path, action_mode, trashed_to_path, file_size, performed_at
+	FROM actions_log
+	ORDER BY performed_at DESC
+	LIMIT ?;
+	`
+	rows, err := d.Conn.QueryContext(ctx, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query action logs: %w", err)
+	}
+	defer rows.Close()
+
+	var logs []models.ActionLog
+	for rows.Next() {
+		var l models.ActionLog
+		var trashedPath sql.NullString
+		var perfSec int64
+		var mode string
+
+		if err := rows.Scan(&l.ID, &l.FilePath, &mode, &trashedPath, &l.FileSize, &perfSec); err != nil {
+			return nil, fmt.Errorf("failed to scan action log row: %w", err)
+		}
+		l.ActionMode = models.ActionMode(mode)
+		if trashedPath.Valid {
+			l.TrashedToPath = &trashedPath.String
+		}
+		l.PerformedAt = time.Unix(perfSec, 0)
+		logs = append(logs, l)
+	}
+	return logs, rows.Err()
+}
+
+
+

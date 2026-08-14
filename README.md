@@ -45,9 +45,9 @@ storage-optimizer/
 | **Phase 2** | **Duplicate Detection Engine** | ✅ Completed | Two-pass strategy: Pass 1 size-bucket filter + Pass 2 parallel streaming SHA-256 (64 KB chunk buffers), atomic hash batch updater, `storage-optimizer duplicates` CLI reporting reclaimable wasted bytes. |
 | **Phase 3** | **Unused / Stale File Scoring & System Classification** | ✅ Completed | `mtime`/`atime` exponential decay scoring, path/extension weighting matrix, 6-tier system file classification (`system_protected`, `system_log`, `crash_dump`, `temp`, `system_cache`, `user`), CLI `storage-optimizer stale --days N`. |
 | **Phase 4** | **Incremental Re-Scan & Deletion Pruning** | ✅ Completed | `mtime`/`size` diffing with automatic hash invalidation on modification, stale row pruning for deleted files, time-series `scan_snapshots` logging, CLI `storage-optimizer snapshots`. |
-| **Phase 5** | **Local HTTP REST API** | ⏳ **Next Up** | Standard Go `net/http` REST endpoints (`/api/v1/...`) unblocking Sahil on Day 7. |
-| **Phase 6** | **Action Layer (Trash & Delete)** | ⏳ Pending | User-confirmed `trash` (relocate to `<app_data>/trash/` with restore) and `permanent` (`os.Remove`), pre-action existence validation, and mandatory `actions_log` audit trail. |
-| **Phase 7** | **GUI Application Shell (Wails)** | ⏳ Pending | Wails desktop window, sidebar navigation, action confirmation dialogs, wiring to Go HTTP API, placeholder views for Sahil's charts. |
+| **Phase 5** | **Local HTTP REST API** | ✅ Completed | Standard Go `net/http` REST endpoints on `127.0.0.1:8080` (`/health`, `/stats`, `/scan`, `/scan/status`, `/files/duplicates`, `/files/stale`, `/snapshots`, `/actions/history`, `/actions`, `/actions/restore`), CORS middleware, CLI `storage-optimizer serve`. |
+| **Phase 6** | **Action Layer (Trash, Delete & Restore)** | ✅ Completed | OS Native FreeDesktop.org XDG Trash integration (`~/.local/share/Trash/files` & `.trashinfo`), permanent deletion, system directory & inode safety gates, restore mechanism, and immutable `actions_log` audit trail. |
+| **Phase 7** | **GUI Application Shell (Wails)** | ⏳ **Next Up** | Wails desktop window, sidebar navigation, action confirmation dialogs, wiring to Go HTTP API, placeholder views for Sahil's charts. |
 | **Phase 8** | **Benchmarking & Hardening** | ⏳ Pending | Synthetic directory stress testing (100k+ files), memory leak auditing, SQLite contention verification. |
 
 ---
@@ -62,9 +62,10 @@ storage-optimizer/
    - Python consumes `/api/v1/snapshots`, `/api/v1/files/duplicates`, and `/api/v1/files/stale` as a regular HTTP client, avoiding direct SQLite file locking conflicts.
 3. **Safety First in Actions & OS Directory Protection**:
    - No automatic deletions.
-   - Critical Linux system paths (`/etc`, `/usr`, `/boot`, `/lib`) are tagged as `system_protected` with a safety penalty ($0.01$) to shield them from cleanup, while junk logs and crash dumps are flagged for cleaning.
-   - Every cleanup requires explicit user confirmation (`trash` or `permanent`).
-   - Every action is logged to `actions_log` before execution.
+   - Critical Linux system paths (`/etc`, `/usr`, `/boot`, `/lib`, `/sys`, `/proc`) and `system_protected` files are hard-blocked from mutation.
+   - Pre-mutation Inode and size verification prevents race condition swap attacks.
+   - FreeDesktop.org XDG Trash support allows immediate user visibility and restoration in native file managers (Nautilus/Dolphin).
+   - Every action is logged to `actions_log` before/after mutation.
 4. **Performance & Systems Integrity**:
    - `os.Lstat` prevents circular symlink loops.
    - Streaming SHA-256 chunk buffers (64 KB) prevent RAM bloat on multi-gigabyte files.
@@ -101,6 +102,28 @@ go build -o bin/storage-optimizer cmd/storage-optimizer/main.go
 ```bash
 ./bin/storage-optimizer snapshots
 ```
+
+### 6. Start Local HTTP REST API Server (Phase 5)
+```bash
+# Serves http://127.0.0.1:8080/api/v1 for GUI and Python microservice
+./bin/storage-optimizer serve
+```
+
+### 7. File Cleanup, Trash, Restore & Audit Logs (Phase 6)
+```bash
+# Move files to OS Native XDG Trash (~/.local/share/Trash/)
+./bin/storage-optimizer delete --ids 104,105 --mode trash
+
+# Permanently destroy files (logs audit record before os.Remove)
+./bin/storage-optimizer delete --ids 106 --mode permanent
+
+# Restore a previously trashed file back to disk and database index
+./bin/storage-optimizer restore --id 1
+
+# View immutable audit log of cleanup actions
+./bin/storage-optimizer actions
+```
+
 
 ---
 
