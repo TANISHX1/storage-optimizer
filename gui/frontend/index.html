@@ -3,95 +3,116 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Intelligent Storage Optimizer</title>
-  <!-- Google Fonts: Outfit for Display, Inter for UI, JetBrains Mono for Code/Paths -->
+  <title>Storage Optimizer — macOS HIG Edition</title>
+  <!-- Apple Typography: SF Pro Text/Display fallback via Inter & Outfit + JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="app-layout">
-    <!-- Sidebar Navigation -->
+  <div class="window-frame">
+    <!-- Sidebar / macOS Source List -->
     <aside class="sidebar">
+      <!-- Traffic Light Window Controls -->
+      <div class="window-controls">
+        <span class="control-dot close" title="Close"></span>
+        <span class="control-dot minimize" title="Minimize"></span>
+        <span class="control-dot maximize" title="Zoom"></span>
+      </div>
+
+      <!-- App Brand / Header -->
       <div class="brand">
         <div class="brand-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
           </svg>
         </div>
         <div class="brand-text">
           <h2>StorageOpt</h2>
-          <span>Linux Systems Core</span>
+          <span class="brand-edition">Linux Pro</span>
         </div>
       </div>
 
+      <!-- Navigation Categories -->
       <nav class="nav-menu">
+        <div class="nav-section-label">Overview</div>
         <button class="nav-item active" data-tab="dashboard" id="nav-dashboard">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="3" width="7" height="7"/>
-            <rect x="14" y="3" width="7" height="7"/>
-            <rect x="14" y="14" width="7" height="7"/>
-            <rect x="3" y="14" width="7" height="7"/>
-          </svg>
+          <div class="nav-icon-box blue">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="7" height="7" rx="1.5"/>
+              <rect x="14" y="3" width="7" height="7" rx="1.5"/>
+              <rect x="14" y="14" width="7" height="7" rx="1.5"/>
+              <rect x="3" y="14" width="7" height="7" rx="1.5"/>
+            </svg>
+          </div>
           <span>Dashboard</span>
         </button>
 
+        <div class="nav-section-label">Optimization</div>
         <button class="nav-item" data-tab="scanner" id="nav-scanner">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/>
-            <line x1="12" y1="8" x2="12" y2="12"/>
-            <line x1="12" y1="16" x2="12.01" y2="16"/>
-            <path d="M12 2a10 10 0 1 0 10 10"/>
-          </svg>
+          <div class="nav-icon-box cyan">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"/>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+          </div>
           <span>Scan & Index</span>
         </button>
 
         <button class="nav-item" data-tab="duplicates" id="nav-duplicates">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-          </svg>
+          <div class="nav-icon-box purple">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+            </svg>
+          </div>
           <span>Duplicates</span>
           <span class="nav-badge" id="badge-duplicates">0</span>
         </button>
 
         <button class="nav-item" data-tab="stale" id="nav-stale">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/>
-            <polyline points="12 6 12 12 16 14"/>
-          </svg>
-          <span>Stale & Junk</span>
+          <div class="nav-icon-box amber">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
+            </svg>
+          </div>
+          <span>Stale Files</span>
           <span class="nav-badge warning" id="badge-stale">0</span>
         </button>
 
+        <div class="nav-section-label">Intelligence</div>
         <button class="nav-item" data-tab="forecasting" id="nav-forecasting">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="20" x2="18" y2="10"/>
-            <line x1="12" y1="20" x2="12" y2="4"/>
-            <line x1="6" y1="20" x2="6" y2="14"/>
-            <path d="M2 17l10-10 6 6 4-4"/>
-          </svg>
+          <div class="nav-icon-box mint">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
+              <polyline points="17 6 23 6 23 12"/>
+            </svg>
+          </div>
           <span>AI Forecast (ML)</span>
         </button>
 
+        <div class="nav-section-label">Safety & Logs</div>
         <button class="nav-item" data-tab="audit" id="nav-audit">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="3 6 5 6 21 6"/>
-            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-            <line x1="10" y1="11" x2="10" y2="17"/>
-            <line x1="14" y1="11" x2="14" y2="17"/>
-          </svg>
+          <div class="nav-icon-box gray">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            </svg>
+          </div>
           <span>Trash & Audit</span>
+          <span class="nav-badge" id="badge-audit">0</span>
         </button>
       </nav>
 
+      <!-- Sidebar Footer Status -->
       <div class="sidebar-footer">
         <div class="api-status-card">
           <div class="status-indicator-dot online" id="api-status-dot"></div>
           <div class="status-meta">
-            <span class="status-title" id="api-status-title">Go Core Connected</span>
-            <span class="status-sub" id="api-status-sub">http://127.0.0.1:8080</span>
+            <span class="status-title" id="api-status-title">Go Core Active</span>
+            <span class="status-sub" id="api-status-sub">127.0.0.1:8080</span>
           </div>
         </div>
       </div>
@@ -99,16 +120,16 @@
 
     <!-- Main Content Area -->
     <main class="main-content">
-      <!-- Top Header -->
-      <header class="topbar">
-        <div class="topbar-title">
+      <!-- Unified macOS Toolbar -->
+      <header class="toolbar">
+        <div class="toolbar-title-area">
           <h1 id="page-title">System Dashboard</h1>
           <p id="page-subtitle">Real-time local storage health, category classification, and cleanup analytics</p>
         </div>
 
-        <div class="topbar-actions">
-          <button class="btn btn-secondary" id="btn-refresh-all">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <div class="toolbar-controls">
+          <button class="btn btn-secondary" id="btn-refresh-all" title="Refresh all storage data">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="23 4 23 10 17 10"/>
               <polyline points="1 20 1 14 7 14"/>
               <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
@@ -116,8 +137,9 @@
             <span>Refresh</span>
           </button>
           <button class="btn btn-primary" id="btn-quick-scan">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polygon points="5 3 19 12 5 21 5 3"/>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 8 12 12 14 14"/>
             </svg>
             <span>New Scan</span>
           </button>
@@ -126,15 +148,48 @@
 
       <!-- Scrollable Tab Container -->
       <div class="content-body">
+        <!-- ============================================================ -->
         <!-- TAB 1: DASHBOARD -->
+        <!-- ============================================================ -->
         <section class="tab-pane active" id="tab-dashboard">
-          <!-- Metric Stat Cards -->
+          <!-- macOS Storage Breakdown Hero Bar (About This Mac style) -->
+          <div class="mac-storage-hero frosted-card">
+            <div class="storage-hero-header">
+              <div>
+                <span class="eyebrow-label">Internal NVMe / System Volume</span>
+                <h2 id="storage-hero-title">-- Indexed Storage</h2>
+              </div>
+              <div class="storage-hero-summary">
+                <span class="reclaim-callout" id="storage-hero-reclaim">-- Reclaimable</span>
+              </div>
+            </div>
+
+            <!-- Multi-segment segmented bar -->
+            <div class="storage-bar-wrapper">
+              <div class="storage-bar" id="storage-multi-bar">
+                <div class="bar-segment user" style="width: 50%" title="User Files"></div>
+                <div class="bar-segment sys" style="width: 25%" title="System Protected"></div>
+                <div class="bar-segment cache" style="width: 10%" title="Cache & Temp"></div>
+                <div class="bar-segment dup" style="width: 15%" title="Duplicate Copies"></div>
+              </div>
+            </div>
+
+            <!-- Segment Legend Chips -->
+            <div class="storage-bar-legend" id="storage-bar-chips">
+              <div class="chip-item"><span class="dot user"></span><span class="name">User Data</span><span class="val" id="bar-val-user">--</span></div>
+              <div class="chip-item"><span class="dot sys"></span><span class="name">System Protected</span><span class="val" id="bar-val-sys">--</span></div>
+              <div class="chip-item"><span class="dot cache"></span><span class="name">Logs & Cache</span><span class="val" id="bar-val-cache">--</span></div>
+              <div class="chip-item"><span class="dot dup"></span><span class="name">Duplicate Copies</span><span class="val" id="bar-val-dup">--</span></div>
+            </div>
+          </div>
+
+          <!-- HIG Metric Cards Grid -->
           <div class="metrics-grid">
-            <div class="metric-card glass-card">
+            <div class="metric-card frosted-card">
               <div class="metric-header">
-                <span class="metric-label">Total Indexed Storage</span>
-                <div class="metric-icon cyan">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <span class="metric-label">Total Indexed</span>
+                <div class="metric-icon-bubble blue">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
                   </svg>
                 </div>
@@ -143,63 +198,66 @@
               <div class="metric-footnote" id="stat-total-files">-- files indexed</div>
             </div>
 
-            <div class="metric-card glass-card">
+            <div class="metric-card frosted-card">
               <div class="metric-header">
-                <span class="metric-label">Duplicate Wasted Space</span>
-                <div class="metric-icon purple">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <span class="metric-label">Duplicate Copies</span>
+                <div class="metric-icon-bubble purple">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                   </svg>
                 </div>
               </div>
-              <div class="metric-value" id="stat-duplicate-bytes">--</div>
-              <div class="metric-footnote text-accent" id="stat-duplicate-count">-- duplicate files found</div>
+              <div class="metric-value text-purple" id="stat-duplicate-bytes">--</div>
+              <div class="metric-footnote" id="stat-duplicate-count">-- redundant files</div>
             </div>
 
-            <div class="metric-card glass-card">
+            <div class="metric-card frosted-card">
               <div class="metric-header">
-                <span class="metric-label">Stale / Inactive Junk</span>
-                <div class="metric-icon amber">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <span class="metric-label">Inactive Stale Files</span>
+                <div class="metric-icon-bubble amber">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="12" cy="12" r="10"/>
                     <polyline points="12 6 12 12 16 14"/>
                   </svg>
                 </div>
               </div>
-              <div class="metric-value" id="stat-stale-bytes">--</div>
-              <div class="metric-footnote text-warning" id="stat-stale-count">-- files untouched (30+ days)</div>
+              <div class="metric-value text-amber" id="stat-stale-bytes">--</div>
+              <div class="metric-footnote" id="stat-stale-count">-- files (30+ days)</div>
             </div>
 
-            <div class="metric-card glass-card">
+            <div class="metric-card frosted-card">
               <div class="metric-header">
-                <span class="metric-label">Reclaimable Space</span>
-                <div class="metric-icon emerald">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <span class="metric-label">Safe Cleanup Potential</span>
+                <div class="metric-icon-bubble green">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <polyline points="20 6 9 17 4 12"/>
                   </svg>
                 </div>
               </div>
-              <div class="metric-value text-success" id="stat-reclaimable-total">--</div>
-              <div class="metric-footnote">Safe cleanup potential</div>
+              <div class="metric-value text-green" id="stat-reclaimable-total">--</div>
+              <div class="metric-footnote">Trash & purgeable storage</div>
             </div>
           </div>
 
-          <!-- Charts and Distribution Section -->
+          <!-- Distribution & Quick Actions -->
           <div class="dashboard-grid">
-            <!-- Storage Category Breakdown Card -->
-            <div class="glass-card panel-card">
+            <!-- Category Classification Card -->
+            <div class="frosted-card panel-card">
               <div class="panel-header">
-                <h3>Storage Category Classification</h3>
-                <span class="badge">6 System Tiers</span>
+                <div class="panel-title-group">
+                  <h3>Storage Category Classification</h3>
+                  <p class="subtitle">POSIX file metadata mapped into 6 system isolation tiers</p>
+                </div>
+                <span class="badge badge-secondary">6 System Tiers</span>
               </div>
               <div class="category-breakdown-body">
                 <div class="chart-container">
                   <svg class="donut-chart" viewBox="0 0 100 100" id="category-donut-chart">
-                    <circle class="donut-ring" cx="50" cy="50" r="38" fill="transparent" stroke-width="12"></circle>
+                    <circle class="donut-ring" cx="50" cy="50" r="38" fill="transparent" stroke-width="11"></circle>
                     <g id="donut-segments"></g>
-                    <text x="50" y="48" class="donut-center-title" text-anchor="middle" id="donut-center-val">--</text>
-                    <text x="50" y="60" class="donut-center-sub" text-anchor="middle">TOTAL DISK</text>
+                    <text x="50" y="47" class="donut-center-title" text-anchor="middle" id="donut-center-val">--</text>
+                    <text x="50" y="58" class="donut-center-sub" text-anchor="middle">TOTAL DISK</text>
                   </svg>
                 </div>
                 <div class="category-legend" id="category-legend-list">
@@ -208,34 +266,45 @@
               </div>
             </div>
 
-            <!-- Quick Action Recommendations Card -->
-            <div class="glass-card panel-card">
+            <!-- Intelligent Recommendations -->
+            <div class="frosted-card panel-card">
               <div class="panel-header">
-                <h3>Recommended System Actions</h3>
-                <span class="badge badge-emerald">Engine Ready</span>
+                <div class="panel-title-group">
+                  <h3>Optimization Recommendations</h3>
+                  <p class="subtitle">High-yield actions prioritized by safety matrix</p>
+                </div>
+                <span class="badge badge-green">Engine Ready</span>
               </div>
               <div class="recommendations-list" id="dashboard-recommendations">
                 <div class="rec-item">
-                  <div class="rec-icon cyan">⚡</div>
+                  <div class="rec-icon-wrap purple">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                  </div>
                   <div class="rec-content">
-                    <h4>Run Deduplication Sweep</h4>
-                    <p>Clean redundant exact-byte file copies across your projects.</p>
+                    <h4>Reclaim Duplicate Space</h4>
+                    <p>Relocate redundant SHA-256 byte copies into FreeDesktop XDG Trash.</p>
                   </div>
                   <button class="btn btn-sm btn-secondary" onclick="app.switchTab('duplicates')">Review</button>
                 </div>
+
                 <div class="rec-item">
-                  <div class="rec-icon amber">⏳</div>
+                  <div class="rec-icon-wrap amber">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                  </div>
                   <div class="rec-content">
-                    <h4>Prune Stale Logs & Caches</h4>
-                    <p>Purge build artifacts and system crash logs older than 60 days.</p>
+                    <h4>Purge Stale Build Caches & Logs</h4>
+                    <p>Clean inactive crash dumps and expired log archives untouched for 60+ days.</p>
                   </div>
                   <button class="btn btn-sm btn-secondary" onclick="app.switchTab('stale')">Inspect</button>
                 </div>
+
                 <div class="rec-item">
-                  <div class="rec-icon emerald">📈</div>
+                  <div class="rec-icon-wrap mint">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+                  </div>
                   <div class="rec-content">
-                    <h4>Storage Growth Trajectory</h4>
-                    <p>View forecasting analytics and days until disk capacity limits.</p>
+                    <h4>AI Growth Trend Forecast</h4>
+                    <p>Project 30-day capacity runway and disk exhaustion horizon.</p>
                   </div>
                   <button class="btn btn-sm btn-secondary" onclick="app.switchTab('forecasting')">Forecast</button>
                 </div>
@@ -244,46 +313,55 @@
           </div>
         </section>
 
+        <!-- ============================================================ -->
         <!-- TAB 2: SCANNER & DISCOVERY -->
+        <!-- ============================================================ -->
         <section class="tab-pane" id="tab-scanner">
-          <div class="glass-card scanner-control-card">
+          <div class="frosted-card scanner-control-card">
             <div class="panel-header">
-              <div>
-                <h3>High-Throughput Concurrent Scanner</h3>
-                <p class="subtitle">Indexes filesystem metadata, resolves Inodes, classifies system files, and prunes deleted records.</p>
+              <div class="panel-title-group">
+                <h3>Concurrent Filesystem Walker</h3>
+                <p class="subtitle">High-throughput POSIX walker indexing inodes, mtime/atime, and system categories</p>
               </div>
             </div>
 
             <div class="scan-form">
               <div class="form-group">
                 <label for="scan-path-input">Target Root Directory</label>
-                <div class="input-with-button">
+                <div class="input-with-action">
                   <input type="text" id="scan-path-input" placeholder="/home/blazex/Documents" value="/home/blazex/Documents">
+                  <button class="btn btn-secondary btn-icon-only" id="btn-browse-folder" onclick="app.chooseNativeFolder()" title="Choose Folder in OS File Dialog">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                    </svg>
+                    <span>Browse...</span>
+                  </button>
                 </div>
+
                 <div class="preset-chips">
-                  <span>Presets:</span>
-                  <button class="chip" onclick="app.setScanPath('/home/blazex/Documents')">Documents</button>
-                  <button class="chip" onclick="app.setScanPath('/home/blazex/Downloads')">Downloads</button>
-                  <button class="chip" onclick="app.setScanPath('/home/blazex')">Home Directory</button>
-                  <button class="chip" onclick="app.setScanPath('/tmp')">/tmp</button>
+                  <span class="preset-label">Quick Locations:</span>
+                  <button class="chip" onclick="app.setScanPath('/home/blazex/Documents')">📁 Documents</button>
+                  <button class="chip" onclick="app.setScanPath('/home/blazex/Downloads')">📥 Downloads</button>
+                  <button class="chip" onclick="app.setScanPath('/home/blazex')">🏠 Home</button>
+                  <button class="chip" onclick="app.setScanPath('/tmp')">⚡ /tmp</button>
                 </div>
               </div>
 
               <div class="form-row">
                 <div class="form-group flex-1">
-                  <label for="scan-workers-input">Worker Goroutine Concurrency</label>
-                  <div class="slider-row">
-                    <input type="range" id="scan-workers-input" min="1" max="24" value="12" oninput="document.getElementById('worker-val').innerText = this.value">
+                  <label for="scan-workers-input">Concurrency Workers (Bounded Goroutine Pool)</label>
+                  <div class="slider-wrapper">
+                    <input type="range" id="scan-workers-input" min="1" max="24" value="12" oninput="document.getElementById('worker-val').innerText = this.value + ' Workers'">
                     <span class="slider-badge" id="worker-val">12 Workers</span>
                   </div>
                 </div>
 
                 <div class="form-group align-end">
                   <button class="btn btn-primary btn-lg" id="btn-start-scan" onclick="app.startScan()">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                       <polygon points="5 3 19 12 5 21 5 3"/>
                     </svg>
-                    <span>Start Concurrent Scan</span>
+                    <span>Start Indexing</span>
                   </button>
                 </div>
               </div>
@@ -293,30 +371,33 @@
             <div class="scan-progress-box" id="scan-progress-box" style="display: none;">
               <div class="progress-header">
                 <div class="scan-status-badge">
-                  <div class="spinner-dot"></div>
+                  <div class="spinner-ring"></div>
                   <span id="scan-status-text">Scanning Filesystem...</span>
                 </div>
                 <div class="progress-stats" id="scan-stats-text">-- files / -- MB</div>
               </div>
-              <div class="progress-bar-container">
-                <div class="progress-bar-fill indeterminate" id="scan-progress-bar"></div>
+              <div class="progress-track">
+                <div class="progress-fill indeterminate" id="scan-progress-bar"></div>
               </div>
             </div>
           </div>
 
-          <!-- Scan History & Snapshots Table -->
-          <div class="glass-card panel-card margin-top">
+          <!-- Scan History Table -->
+          <div class="frosted-card panel-card margin-top">
             <div class="panel-header">
-              <h3>Recorded Scan Snapshots (Time-Series)</h3>
-              <span class="badge" id="snapshots-count-badge">0 Records</span>
+              <div class="panel-title-group">
+                <h3>Recorded Scan Snapshots (Time-Series)</h3>
+                <p class="subtitle">Historical snapshots for machine learning growth models</p>
+              </div>
+              <span class="badge badge-secondary" id="snapshots-count-badge">0 Records</span>
             </div>
             <div class="table-container">
-              <table class="data-table" id="snapshots-table">
+              <table class="mac-table" id="snapshots-table">
                 <thead>
                   <tr>
                     <th>Snapshot ID</th>
                     <th>Scanned At</th>
-                    <th>Root Directory</th>
+                    <th>Root Path</th>
                     <th>Indexed Files</th>
                     <th>Total Size</th>
                   </tr>
@@ -329,71 +410,83 @@
           </div>
         </section>
 
+        <!-- ============================================================ -->
         <!-- TAB 3: DUPLICATES EXPLORER -->
+        <!-- ============================================================ -->
         <section class="tab-pane" id="tab-duplicates">
-          <div class="pane-action-bar glass-card">
+          <div class="pane-action-bar frosted-card">
             <div class="action-bar-left">
-              <h3>Duplicate File Clusters</h3>
-              <span class="badge badge-purple" id="dup-summary-badge">0 Duplicate Groups</span>
+              <div class="panel-title-group">
+                <h3>Duplicate File Clusters</h3>
+                <p class="subtitle">Identified via 2-pass size filter and streaming SHA-256</p>
+              </div>
+              <span class="badge badge-purple" id="dup-summary-badge">0 Groups</span>
             </div>
             <div class="action-bar-right">
-              <button class="btn btn-sm btn-secondary" onclick="app.selectDuplicateCopies()">Select All Redundant Copies</button>
-              <button class="btn btn-sm btn-warning" id="btn-trash-duplicates" onclick="app.promptTrashSelected('duplicates')" disabled>
-                Move Selected to Trash
+              <button class="btn btn-secondary" onclick="app.selectDuplicateCopies()">Select Redundant Copies</button>
+              <button class="btn btn-warning" id="btn-trash-duplicates" onclick="app.promptTrashSelected('duplicates')" disabled>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                <span>Move to Trash</span>
               </button>
-              <button class="btn btn-sm btn-danger" id="btn-perm-duplicates" onclick="app.promptPermanentDelete('duplicates')" disabled>
-                Permanent Delete
+              <button class="btn btn-danger" id="btn-perm-duplicates" onclick="app.promptPermanentDelete('duplicates')" disabled>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/></svg>
+                <span>Delete...</span>
               </button>
             </div>
           </div>
 
           <div class="duplicates-list" id="duplicates-container">
             <div class="empty-state">
-              <div class="empty-icon">📂</div>
+              <div class="empty-icon-wrap">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              </div>
               <h3>No Duplicate Clusters</h3>
-              <p>Run a scan or click "Refresh" to detect redundant file clusters.</p>
+              <p>Your indexed storage is clean and free of redundant identical copies.</p>
             </div>
           </div>
         </section>
 
+        <!-- ============================================================ -->
         <!-- TAB 4: STALE & JUNK FILES -->
+        <!-- ============================================================ -->
         <section class="tab-pane" id="tab-stale">
-          <div class="pane-action-bar glass-card">
+          <div class="pane-action-bar frosted-card">
             <div class="action-bar-left">
-              <div class="filter-group">
-                <span class="filter-label">Untouched for:</span>
-                <div class="btn-group">
-                  <button class="btn-filter active" data-days="30" onclick="app.loadStaleFiles(30)">30d+</button>
-                  <button class="btn-filter" data-days="60" onclick="app.loadStaleFiles(60)">60d+</button>
-                  <button class="btn-filter" data-days="90" onclick="app.loadStaleFiles(90)">90d+</button>
-                  <button class="btn-filter" data-days="180" onclick="app.loadStaleFiles(180)">180d+</button>
-                  <button class="btn-filter" data-days="365" onclick="app.loadStaleFiles(365)">1 yr+</button>
+              <div class="segmented-control-wrapper">
+                <span class="control-label">Untouched for:</span>
+                <div class="mac-segmented-control" id="stale-segmented-control">
+                  <button class="segment-btn active" data-days="30" onclick="app.loadStaleFiles(30)">30 Days</button>
+                  <button class="segment-btn" data-days="60" onclick="app.loadStaleFiles(60)">60 Days</button>
+                  <button class="segment-btn" data-days="90" onclick="app.loadStaleFiles(90)">90 Days</button>
+                  <button class="segment-btn" data-days="180" onclick="app.loadStaleFiles(180)">6 Months</button>
+                  <button class="segment-btn" data-days="365" onclick="app.loadStaleFiles(365)">1 Year</button>
                 </div>
               </div>
             </div>
 
             <div class="action-bar-right">
-              <button class="btn btn-sm btn-secondary" onclick="app.selectAllStale()">Select All Non-System</button>
-              <button class="btn btn-sm btn-warning" id="btn-trash-stale" onclick="app.promptTrashSelected('stale')" disabled>
-                Trash Selected
+              <button class="btn btn-secondary" onclick="app.selectAllStale()">Select Safe Candidates</button>
+              <button class="btn btn-warning" id="btn-trash-stale" onclick="app.promptTrashSelected('stale')" disabled>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                <span>Trash Selected</span>
               </button>
-              <button class="btn btn-sm btn-danger" id="btn-perm-stale" onclick="app.promptPermanentDelete('stale')" disabled>
-                Permanent Delete
+              <button class="btn btn-danger" id="btn-perm-stale" onclick="app.promptPermanentDelete('stale')" disabled>
+                <span>Delete...</span>
               </button>
             </div>
           </div>
 
-          <div class="glass-card panel-card margin-top">
+          <div class="frosted-card panel-card margin-top">
             <div class="table-container">
-              <table class="data-table" id="stale-table">
+              <table class="mac-table" id="stale-table">
                 <thead>
                   <tr>
-                    <th width="40"><input type="checkbox" id="check-all-stale" onchange="app.toggleAllStaleCheckboxes(this.checked)"></th>
-                    <th>Staleness Score</th>
-                    <th>Category</th>
+                    <th width="44"><input type="checkbox" id="check-all-stale" onchange="app.toggleAllStaleCheckboxes(this.checked)"></th>
+                    <th width="140">Staleness Score</th>
+                    <th width="140">Category</th>
                     <th>File Path</th>
-                    <th>Size</th>
-                    <th>Age</th>
+                    <th width="100">Size</th>
+                    <th width="140">Last Accessed</th>
                   </tr>
                 </thead>
                 <tbody id="stale-table-body">
@@ -404,47 +497,55 @@
           </div>
         </section>
 
-        <!-- TAB 5: AI FORECASTING (SAHIL'S LAYER) -->
+        <!-- ============================================================ -->
+        <!-- TAB 5: AI FORECASTING (SAHIL'S ML LAYER) -->
+        <!-- ============================================================ -->
         <section class="tab-pane" id="tab-forecasting">
           <div class="metrics-grid">
-            <div class="metric-card glass-card">
+            <div class="metric-card frosted-card">
               <div class="metric-header">
                 <span class="metric-label">Estimated Daily Growth</span>
-                <div class="metric-icon cyan">📈</div>
+                <div class="metric-icon-bubble blue">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+                </div>
               </div>
               <div class="metric-value" id="forecast-daily-growth">--</div>
-              <div class="metric-footnote" id="forecast-growth-sub">Computed across scan snapshots</div>
+              <div class="metric-footnote" id="forecast-growth-sub">Linear & ARIMA regression baseline</div>
             </div>
 
-            <div class="metric-card glass-card">
+            <div class="metric-card frosted-card">
               <div class="metric-header">
-                <span class="metric-label">Days Until Disk Full (EOD)</span>
-                <div class="metric-icon amber">⏳</div>
+                <span class="metric-label">Days Until Disk Full</span>
+                <div class="metric-icon-bubble amber">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                </div>
               </div>
-              <div class="metric-value text-warning" id="forecast-days-until-full">--</div>
+              <div class="metric-value text-amber" id="forecast-days-until-full">--</div>
               <div class="metric-footnote">Based on current trajectory</div>
             </div>
 
-            <div class="metric-card glass-card">
+            <div class="metric-card frosted-card">
               <div class="metric-header">
                 <span class="metric-label">Forecast Confidence</span>
-                <div class="metric-icon emerald">✨</div>
+                <div class="metric-icon-bubble mint">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                </div>
               </div>
-              <div class="metric-value text-success" id="forecast-confidence">High</div>
-              <div class="metric-footnote">Linear & exponential regression</div>
+              <div class="metric-value text-mint" id="forecast-confidence">High</div>
+              <div class="metric-footnote">Time-series variance: &lt; 4.2%</div>
             </div>
           </div>
 
-          <!-- Time-series Forecast Chart -->
-          <div class="glass-card panel-card margin-top">
+          <!-- Canvas Chart -->
+          <div class="frosted-card panel-card margin-top">
             <div class="panel-header">
-              <div>
-                <h3>Storage Growth Projection (30-Day Trend)</h3>
-                <p class="subtitle">Historical snapshots and projected future disk consumption.</p>
+              <div class="panel-title-group">
+                <h3>Storage Growth Projection (30-Day Model)</h3>
+                <p class="subtitle">Historical snapshots and projected future disk consumption curve</p>
               </div>
               <div class="chart-legend">
-                <span class="legend-dot historical"></span> Historical
-                <span class="legend-dot projected"></span> Projected
+                <span class="legend-indicator historical"></span> Historical Scans
+                <span class="legend-indicator projected"></span> ML 30-Day Projection
               </div>
             </div>
             <div class="canvas-chart-container">
@@ -452,11 +553,14 @@
             </div>
           </div>
 
-          <!-- AI Recommendation Cards Section -->
-          <div class="glass-card panel-card margin-top">
+          <!-- AI Space Reclamation Recommendations -->
+          <div class="frosted-card panel-card margin-top">
             <div class="panel-header">
-              <h3>Intelligent Space Reclamation Insights</h3>
-              <span class="badge badge-emerald">AI Assistant</span>
+              <div class="panel-title-group">
+                <h3>Intelligent Space Reclamation Insights</h3>
+                <p class="subtitle">Automated suggestions synthesized from file metadata heuristics</p>
+              </div>
+              <span class="badge badge-mint">AI Assistant</span>
             </div>
             <div class="ai-recommendations-grid" id="ai-recommendations-container">
               <!-- Rendered dynamically -->
@@ -464,30 +568,38 @@
           </div>
         </section>
 
+        <!-- ============================================================ -->
         <!-- TAB 6: TRASH & AUDIT LOG -->
+        <!-- ============================================================ -->
         <section class="tab-pane" id="tab-audit">
-          <div class="pane-action-bar glass-card">
+          <div class="pane-action-bar frosted-card">
             <div class="action-bar-left">
-              <h3>FreeDesktop.org Native Trash & Immutable Audit Log</h3>
-              <span class="badge" id="audit-count-badge">0 Log Entries</span>
+              <div class="panel-title-group">
+                <h3>FreeDesktop.org Native Trash & Audit Log</h3>
+                <p class="subtitle">Immutable record of cleanup actions with one-click restore</p>
+              </div>
+              <span class="badge badge-secondary" id="audit-count-badge">0 Records</span>
             </div>
             <div class="action-bar-right">
-              <button class="btn btn-sm btn-secondary" onclick="app.loadAuditLogs()">Refresh Audit Trail</button>
+              <button class="btn btn-secondary" onclick="app.loadAuditLogs()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                <span>Refresh Audit Log</span>
+              </button>
             </div>
           </div>
 
-          <div class="glass-card panel-card margin-top">
+          <div class="frosted-card panel-card margin-top">
             <div class="table-container">
-              <table class="data-table" id="audit-table">
+              <table class="mac-table" id="audit-table">
                 <thead>
                   <tr>
-                    <th>Action ID</th>
-                    <th>Mode</th>
-                    <th>Original File Path</th>
+                    <th width="80">Log ID</th>
+                    <th width="110">Action</th>
+                    <th>Original Path</th>
                     <th>Trash Location</th>
-                    <th>Size Freed</th>
-                    <th>Timestamp</th>
-                    <th width="100">Actions</th>
+                    <th width="100">Size</th>
+                    <th width="150">Executed At</th>
+                    <th width="110">Restore</th>
                   </tr>
                 </thead>
                 <tbody id="audit-table-body">
@@ -501,24 +613,30 @@
     </main>
   </div>
 
-  <!-- Confirmation Modal Dialog -->
+  <!-- macOS Sheet / Modal Dialog -->
   <div class="modal-backdrop" id="action-modal" style="display: none;">
-    <div class="modal-box glass-card">
-      <div class="modal-header">
-        <h3 id="modal-title">Confirm File Action</h3>
-        <button class="btn-close" onclick="app.closeModal()">✕</button>
+    <div class="mac-sheet-modal">
+      <div class="sheet-header">
+        <div class="sheet-icon-bubble" id="sheet-icon-bubble">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+        </div>
+        <div>
+          <h3 id="modal-title">Confirm Cleanup Action</h3>
+          <p id="modal-message">Are you sure you want to process the selected files?</p>
+        </div>
       </div>
-      <div class="modal-body">
-        <p id="modal-message">Are you sure you want to perform this action on the selected files?</p>
+
+      <div class="sheet-body">
         <div class="modal-file-preview" id="modal-file-list"></div>
-        <div class="modal-warning-box" id="modal-warning">
-          <span class="warning-icon">⚠️</span>
+        <div class="sheet-warning-box" id="modal-warning">
+          <span class="warning-icon">ℹ️</span>
           <span id="modal-warning-text">Files will be moved to FreeDesktop.org OS Native Trash and can be restored at any time.</span>
         </div>
       </div>
-      <div class="modal-footer">
+
+      <div class="sheet-footer">
         <button class="btn btn-secondary" onclick="app.closeModal()">Cancel</button>
-        <button class="btn btn-primary" id="btn-modal-confirm" onclick="app.executeConfirmedAction()">Confirm Action</button>
+        <button class="btn btn-primary" id="btn-modal-confirm" onclick="app.executeConfirmedAction()">Confirm</button>
       </div>
     </div>
   </div>

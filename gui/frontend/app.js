@@ -1,5 +1,8 @@
-// Intelligent Storage Optimizer - Frontend Application Logic
+// ==========================================================================
+// Intelligent Storage Optimizer — macOS HIG Application Controller
 // Communicates with Go Core REST API (http://127.0.0.1:8080/api/v1)
+// & Native Wails v2 Runtime Bindings (window.go.main.App)
+// ==========================================================================
 
 class StorageApp {
   constructor() {
@@ -14,7 +17,7 @@ class StorageApp {
     this.duplicates = [];
     this.staleFiles = [];
     this.auditLogs = [];
-    
+
     // Modal State
     this.pendingAction = null; // { mode: 'trash'|'permanent', ids: [], files: [] }
 
@@ -23,15 +26,39 @@ class StorageApp {
 
   init() {
     this.setupNavigation();
+    this.setupWindowControls();
     this.checkApiHealth();
     this.healthPollTimer = setInterval(() => this.checkApiHealth(), 10000);
     this.loadAllData();
     this.setupEventListeners();
   }
 
+  setupWindowControls() {
+    // Window Traffic Lights
+    document.querySelector('.control-dot.close')?.addEventListener('click', () => {
+      if (window.runtime?.Quit) {
+        window.runtime.Quit();
+      } else {
+        this.showToast('Window close triggered (Native Shell)', 'info');
+      }
+    });
+
+    document.querySelector('.control-dot.minimize')?.addEventListener('click', () => {
+      if (window.runtime?.WindowMinimise) {
+        window.runtime.WindowMinimise();
+      }
+    });
+
+    document.querySelector('.control-dot.maximize')?.addEventListener('click', () => {
+      if (window.runtime?.WindowToggleMaximise) {
+        window.runtime.WindowToggleMaximise();
+      }
+    });
+  }
+
   setupNavigation() {
     document.querySelectorAll('.nav-item').forEach(button => {
-      button.addEventListener('click', (e) => {
+      button.addEventListener('click', () => {
         const tab = button.getAttribute('data-tab');
         this.switchTab(tab);
       });
@@ -40,12 +67,19 @@ class StorageApp {
 
   setupEventListeners() {
     document.getElementById('btn-refresh-all')?.addEventListener('click', () => {
-      this.showToast('Refreshing all system metrics...', 'info');
+      this.showToast('Refreshing all storage metrics...', 'info');
       this.loadAllData();
     });
 
     document.getElementById('btn-quick-scan')?.addEventListener('click', () => {
       this.switchTab('scanner');
+    });
+
+    // Close modal on Escape
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && this.pendingAction) {
+        this.closeModal();
+      }
     });
   }
 
@@ -65,7 +99,7 @@ class StorageApp {
     // Update Page Header Titles
     const titles = {
       dashboard: { title: 'System Dashboard', sub: 'Real-time local storage health, category classification, and cleanup analytics' },
-      scanner: { title: 'Filesystem Scanner & Indexer', sub: 'Concurrent POSIX metadata indexing and snapshot tracking' },
+      scanner: { title: 'Filesystem Walker & Indexer', sub: 'Concurrent POSIX metadata indexing and time-series snapshot tracking' },
       duplicates: { title: 'Duplicate File Hunter', sub: 'Two-pass cryptographic deduplication and space reclamation' },
       stale: { title: 'Stale & Inactive Junk Files', sub: 'Mathematical staleness ranking and system log/cache identification' },
       forecasting: { title: 'AI Storage Forecasting (ML Layer)', sub: 'Time-series growth trajectory, days-until-full estimation, and smart recommendations' },
@@ -73,12 +107,36 @@ class StorageApp {
     };
 
     const t = titles[tabId] || titles.dashboard;
-    document.getElementById('page-title').innerText = t.title;
-    document.getElementById('page-subtitle').innerText = t.sub;
+    const titleEl = document.getElementById('page-title');
+    const subEl = document.getElementById('page-subtitle');
+    if (titleEl) titleEl.innerText = t.title;
+    if (subEl) subEl.innerText = t.sub;
 
-    // Trigger tab-specific refresh if needed
     if (tabId === 'forecasting') {
       this.renderForecastView();
+    }
+  }
+
+  // --- Native Wails Integration ---
+
+  async chooseNativeFolder() {
+    try {
+      if (window.go && window.go.main && window.go.main.App && window.go.main.App.SelectDirectory) {
+        const path = await window.go.main.App.SelectDirectory();
+        if (path) {
+          this.setScanPath(path);
+          this.showToast(`Selected directory: ${path}`, 'info');
+        }
+      } else {
+        // Fallback for browser mode
+        const currentVal = document.getElementById('scan-path-input')?.value || '/home/blazex/Documents';
+        const newPath = prompt('Enter directory path to index:', currentVal);
+        if (newPath) {
+          this.setScanPath(newPath);
+        }
+      }
+    } catch (err) {
+      console.warn('Folder picker fallback:', err);
     }
   }
 
@@ -109,14 +167,14 @@ class StorageApp {
     try {
       const data = await this.apiRequest('/health');
       if (data && data.status === 'healthy') {
-        dot.className = 'status-indicator-dot online';
-        title.innerText = 'Go Core Connected';
-        sub.innerText = '127.0.0.1:8080 (Active)';
+        if (dot) dot.className = 'status-indicator-dot online';
+        if (title) title.innerText = 'Go Core Active';
+        if (sub) sub.innerText = '127.0.0.1:8080';
       }
     } catch (err) {
-      dot.className = 'status-indicator-dot';
-      title.innerText = 'Core Disconnected';
-      sub.innerText = 'Start ./bin/storage-optimizer serve';
+      if (dot) dot.className = 'status-indicator-dot';
+      if (title) title.innerText = 'Core Disconnected';
+      if (sub) sub.innerText = 'Start ./bin/storage-optimizer serve';
     }
   }
 
@@ -141,6 +199,7 @@ class StorageApp {
       const stats = await this.apiRequest('/stats');
       this.stats = stats;
       this.renderDashboardStats(stats);
+      this.renderStorageHeroBar(stats);
       this.renderCategoryChart(stats.categories, stats.total_bytes);
     } catch (err) {
       console.error('Failed to load stats:', err);
@@ -154,7 +213,7 @@ class StorageApp {
       const badge = document.getElementById('badge-duplicates');
       if (badge) badge.innerText = this.duplicates.length;
       const summaryBadge = document.getElementById('dup-summary-badge');
-      if (summaryBadge) summaryBadge.innerText = `${this.duplicates.length} Duplicate Groups (${this.formatBytes(data.total_wasted_bytes || 0)} wasted)`;
+      if (summaryBadge) summaryBadge.innerText = `${this.duplicates.length} Groups (${this.formatBytes(data.total_wasted_bytes || 0)} wasted)`;
       this.renderDuplicatesList();
     } catch (err) {
       console.error('Failed to load duplicates:', err);
@@ -163,8 +222,8 @@ class StorageApp {
 
   async loadStaleFiles(days = 30) {
     try {
-      // Update active filter button state
-      document.querySelectorAll('.btn-filter').forEach(b => {
+      // Update segmented control buttons
+      document.querySelectorAll('#stale-segmented-control .segment-btn').forEach(b => {
         b.classList.toggle('active', parseInt(b.getAttribute('data-days')) === days);
       });
 
@@ -198,7 +257,9 @@ class StorageApp {
       const data = await this.apiRequest('/actions/history?limit=100');
       this.auditLogs = data.actions || [];
       const badge = document.getElementById('audit-count-badge');
-      if (badge) badge.innerText = `${this.auditLogs.length} Log Entries`;
+      const sideBadge = document.getElementById('badge-audit');
+      if (badge) badge.innerText = `${this.auditLogs.length} Records`;
+      if (sideBadge) sideBadge.innerText = this.auditLogs.length;
       this.renderAuditTable();
     } catch (err) {
       console.error('Failed to load audit logs:', err);
@@ -212,15 +273,57 @@ class StorageApp {
     document.getElementById('stat-total-files').innerText = `${stats.total_files.toLocaleString()} files indexed`;
 
     document.getElementById('stat-duplicate-bytes').innerText = this.formatBytes(stats.total_wasted_bytes);
-    document.getElementById('stat-duplicate-count').innerText = `${(stats.total_duplicates || 0).toLocaleString()} redundant files`;
+    document.getElementById('stat-duplicate-count').innerText = `${(stats.total_duplicates || 0).toLocaleString()} redundant copies`;
 
-    // Compute stale sum
     const staleBytes = this.staleFiles.reduce((acc, f) => acc + (f.size || 0), 0);
     document.getElementById('stat-stale-bytes').innerText = this.formatBytes(staleBytes);
     document.getElementById('stat-stale-count').innerText = `${this.staleFiles.length} files (30+ days)`;
 
     const reclaimable = (stats.total_wasted_bytes || 0) + staleBytes;
     document.getElementById('stat-reclaimable-total').innerText = this.formatBytes(reclaimable);
+  }
+
+  renderStorageHeroBar(stats) {
+    const heroTitle = document.getElementById('storage-hero-title');
+    const heroReclaim = document.getElementById('storage-hero-reclaim');
+    const bar = document.getElementById('storage-multi-bar');
+
+    if (heroTitle) heroTitle.innerText = `${this.formatBytes(stats.total_bytes)} Indexed Storage`;
+
+    const staleBytes = this.staleFiles.reduce((acc, f) => acc + (f.size || 0), 0);
+    const reclaimable = (stats.total_wasted_bytes || 0) + staleBytes;
+    if (heroReclaim) heroReclaim.innerText = `${this.formatBytes(reclaimable)} Safe Cleanup Potential`;
+
+    if (!bar || !stats.categories) return;
+
+    let userBytes = 0;
+    let sysBytes = 0;
+    let cacheBytes = 0;
+    const dupBytes = stats.total_wasted_bytes || 0;
+
+    stats.categories.forEach(c => {
+      if (c.category === 'user') userBytes += c.total_bytes;
+      else if (c.category === 'system_protected') sysBytes += c.total_bytes;
+      else cacheBytes += c.total_bytes;
+    });
+
+    const total = stats.total_bytes || 1;
+    const userPct = Math.max(Math.round((userBytes / total) * 100), 5);
+    const sysPct = Math.max(Math.round((sysBytes / total) * 100), 5);
+    const cachePct = Math.max(Math.round((cacheBytes / total) * 100), 5);
+    const dupPct = Math.max(Math.round((dupBytes / total) * 100), 5);
+
+    bar.innerHTML = `
+      <div class="bar-segment user" style="width: ${userPct}%" title="User Files: ${this.formatBytes(userBytes)}"></div>
+      <div class="bar-segment sys" style="width: ${sysPct}%" title="System Protected: ${this.formatBytes(sysBytes)}"></div>
+      <div class="bar-segment cache" style="width: ${cachePct}%" title="Logs & Cache: ${this.formatBytes(cacheBytes)}"></div>
+      <div class="bar-segment dup" style="width: ${dupPct}%" title="Duplicates: ${this.formatBytes(dupBytes)}"></div>
+    `;
+
+    document.getElementById('bar-val-user').innerText = this.formatBytes(userBytes);
+    document.getElementById('bar-val-sys').innerText = this.formatBytes(sysBytes);
+    document.getElementById('bar-val-cache').innerText = this.formatBytes(cacheBytes);
+    document.getElementById('bar-val-dup').innerText = this.formatBytes(dupBytes);
   }
 
   renderCategoryChart(categories = [], totalBytes = 0) {
@@ -235,12 +338,12 @@ class StorageApp {
     segmentsContainer.innerHTML = '';
 
     const colors = {
-      user: '#38bdf8',              // Electric Blue
-      system_protected: '#a855f7',  // Purple
-      system_log: '#f59e0b',        // Amber
-      temp: '#ef4444',              // Red/Rose
-      crash_dump: '#f97316',        // Orange
-      system_cache: '#10b981'       // Emerald
+      user: '#007aff',              // Apple Blue
+      system_protected: '#af52de',  // Apple Purple
+      system_log: '#ff9500',        // Apple Orange
+      temp: '#ff3b30',              // Apple Red
+      crash_dump: '#ff2d55',        // Apple Pink
+      system_cache: '#34c759'       // Apple Green
     };
 
     const circumference = 2 * Math.PI * 38; // r=38 -> ~238.76
@@ -250,9 +353,9 @@ class StorageApp {
       const fraction = totalBytes > 0 ? cat.total_bytes / totalBytes : 0;
       const strokeLength = fraction * circumference;
       const strokeSpace = circumference - strokeLength;
-      const color = colors[cat.category] || '#94a3b8';
+      const color = colors[cat.category] || '#8e8e93';
 
-      // SVG Donut slice
+      // SVG Donut segment
       if (fraction > 0.001) {
         const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
         circle.setAttribute('class', 'donut-segment');
@@ -261,9 +364,10 @@ class StorageApp {
         circle.setAttribute('r', '38');
         circle.setAttribute('fill', 'transparent');
         circle.setAttribute('stroke', color);
-        circle.setAttribute('stroke-width', '12');
+        circle.setAttribute('stroke-width', '11');
         circle.setAttribute('stroke-dasharray', `${strokeLength} ${strokeSpace}`);
         circle.setAttribute('stroke-dashoffset', `${-accumulatedOffset}`);
+        circle.setAttribute('stroke-linecap', 'round');
         segmentsContainer.appendChild(circle);
 
         accumulatedOffset += strokeLength;
@@ -290,7 +394,9 @@ class StorageApp {
     if (!this.duplicates || this.duplicates.length === 0) {
       container.innerHTML = `
         <div class="empty-state">
-          <div class="empty-icon">🎉</div>
+          <div class="empty-icon-wrap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </div>
           <h3>Zero Duplicates Found</h3>
           <p>Your storage index is clean and free of redundant identical files.</p>
         </div>
@@ -298,7 +404,7 @@ class StorageApp {
       return;
     }
 
-    container.innerHTML = this.duplicates.map((group, groupIdx) => {
+    container.innerHTML = this.duplicates.map((group) => {
       const wasted = group.wasted_bytes;
       return `
         <div class="duplicate-cluster-card">
@@ -308,7 +414,7 @@ class StorageApp {
               <span>SHA-256: ${group.hash.substring(0, 16)}...</span>
             </div>
             <div class="cluster-meta">
-              <span>${group.files.length} Copies</span> • <span class="text-warning">${this.formatBytes(wasted)} Reclaimable</span>
+              <span>${group.files.length} Copies</span> • <span class="text-amber">${this.formatBytes(wasted)} Reclaimable</span>
             </div>
           </div>
           <div class="cluster-files-list">
@@ -317,9 +423,9 @@ class StorageApp {
               return `
                 <div class="duplicate-item-row ${isFirst ? 'is-original' : ''}">
                   <input type="checkbox" class="dup-checkbox" data-id="${file.id}" data-path="${file.path}" data-size="${file.size}" ${!isFirst ? 'checked' : ''} onchange="app.updateDuplicateActionButtons()">
-                  <span class="path-cell">${file.path}</span>
+                  <span class="path-cell" title="${file.path}">${file.path}</span>
                   <span class="size-cell">${this.formatBytes(file.size)}</span>
-                  ${isFirst ? '<span class="badge badge-emerald">Original (Keep)</span>' : '<span class="badge badge-amber">Duplicate Copy</span>'}
+                  ${isFirst ? '<span class="badge badge-green">Original (Keep)</span>' : '<span class="badge badge-amber">Duplicate Copy</span>'}
                 </div>
               `;
             }).join('')}
@@ -342,8 +448,7 @@ class StorageApp {
   }
 
   selectDuplicateCopies() {
-    document.querySelectorAll('.dup-checkbox').forEach((cb, idx) => {
-      // Keep first copy unchecked, select remainder
+    document.querySelectorAll('.dup-checkbox').forEach((cb) => {
       const isOriginal = cb.closest('.duplicate-item-row').classList.contains('is-original');
       cb.checked = !isOriginal;
     });
@@ -356,13 +461,13 @@ class StorageApp {
     if (!tbody) return;
 
     if (!this.staleFiles || this.staleFiles.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">No stale or inactive files found for this threshold.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">No stale or inactive files found for this age threshold.</td></tr>';
       return;
     }
 
     tbody.innerHTML = this.staleFiles.map(file => {
       const scorePct = Math.round((file.staleness_score || 0) * 100);
-      const scoreColor = scorePct > 80 ? 'var(--accent-rose)' : scorePct > 50 ? 'var(--accent-amber)' : 'var(--accent-blue)';
+      const scoreColor = scorePct > 80 ? 'var(--apple-red)' : scorePct > 50 ? 'var(--apple-orange)' : 'var(--apple-blue)';
       const isProtected = file.category === 'system_protected';
 
       return `
@@ -370,12 +475,12 @@ class StorageApp {
           <td><input type="checkbox" class="stale-checkbox" data-id="${file.id}" data-path="${file.path}" data-size="${file.size}" data-cat="${file.category}" ${isProtected ? 'disabled' : ''} onchange="app.updateStaleActionButtons()"></td>
           <td>
             <div class="staleness-meter"><div class="staleness-fill" style="width: ${scorePct}%; background: ${scoreColor}"></div></div>
-            <span style="font-family: var(--font-mono); font-size: 0.8rem">${(file.staleness_score || 0).toFixed(2)}</span>
+            <span style="font-family: var(--font-mono); font-size: 0.78rem">${(file.staleness_score || 0).toFixed(2)}</span>
           </td>
           <td>${this.renderCategoryBadge(file.category)}</td>
           <td class="path-cell" title="${file.path}">${file.path}</td>
           <td class="size-cell">${this.formatBytes(file.size)}</td>
-          <td style="color: var(--text-dim); font-size: 0.78rem;">${this.formatTimestamp(file.atime || file.mtime)}</td>
+          <td style="color: var(--text-secondary); font-size: 0.76rem;">${this.formatTimestamp(file.atime || file.mtime)}</td>
         </tr>
       `;
     }).join('');
@@ -397,7 +502,7 @@ class StorageApp {
     const checkAll = document.getElementById('check-all-stale');
     if (checkAll) checkAll.checked = true;
     this.updateStaleActionButtons();
-    this.showToast('Selected all non-system stale files.', 'info');
+    this.showToast('Selected safe candidate files for cleanup.', 'info');
   }
 
   updateStaleActionButtons() {
@@ -421,10 +526,10 @@ class StorageApp {
 
     tbody.innerHTML = this.snapshots.map(s => `
       <tr>
-        <td><span class="badge">#${s.id}</span></td>
+        <td><span class="badge badge-secondary">#${s.id}</span></td>
         <td>${this.formatTimestamp(s.scanned_at)}</td>
-        <td class="path-cell">${s.root_path}</td>
-        <td>${(s.total_files || 0).toLocaleString()}</td>
+        <td class="path-cell" title="${s.root_path}">${s.root_path}</td>
+        <td>${(s.total_files || 0).toLocaleString()} files</td>
         <td class="size-cell">${this.formatBytes(s.total_bytes)}</td>
       </tr>
     `).join('');
@@ -443,52 +548,54 @@ class StorageApp {
       const isTrash = log.action_mode === 'trash';
       return `
         <tr>
-          <td><span class="badge">#${log.id}</span></td>
+          <td><span class="badge badge-secondary">#${log.id}</span></td>
           <td><span class="badge ${isTrash ? 'badge-amber' : 'badge-rose'}">${log.action_mode.toUpperCase()}</span></td>
           <td class="path-cell" title="${log.file_path}">${log.file_path}</td>
-          <td class="path-cell" style="color: var(--text-dim);">${log.trashed_to_path || 'None (Removed)'}</td>
+          <td class="path-cell" style="color: var(--text-tertiary);" title="${log.trashed_to_path || ''}">${log.trashed_to_path || 'None (Removed)'}</td>
           <td class="size-cell">${this.formatBytes(log.file_size)}</td>
-          <td>${this.formatTimestamp(log.performed_at)}</td>
+          <td style="color: var(--text-secondary); font-size: 0.76rem;">${this.formatTimestamp(log.performed_at)}</td>
           <td>
-            ${isTrash ? `<button class="btn btn-sm btn-primary" onclick="app.restoreAction(${log.id})">Restore</button>` : '<span style="color: var(--text-dim); font-size: 0.75rem;">Permanent</span>'}
+            ${isTrash ? `<button class="btn btn-sm btn-primary" onclick="app.restoreAction(${log.id})">Restore</button>` : '<span style="color: var(--text-tertiary); font-size: 0.72rem;">Destroyed</span>'}
           </td>
         </tr>
       `;
     }).join('');
   }
 
-  // --- AI Forecasting & ML View (Sahil's View) ---
+  // --- AI Forecasting & ML Canvas (Retina Crisp Scaling) ---
 
   renderForecastView() {
     const canvas = document.getElementById('forecast-canvas');
     if (!canvas) return;
 
-    const ctx = canvas.getContext('2d');
-    const width = canvas.width;
-    const height = canvas.height;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const cssWidth = rect.width || 900;
+    const cssHeight = 300;
 
-    ctx.clearRect(0, 0, width, height);
+    canvas.width = cssWidth * dpr;
+    canvas.height = cssHeight * dpr;
+
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, cssWidth, cssHeight);
 
     if (this.snapshots.length < 2) {
-      // If we don't have enough snapshots, synthesize regression with current stats
-      this.drawEmptyForecast(ctx, width, height);
+      this.drawEmptyForecast(ctx, cssWidth, cssHeight);
       return;
     }
 
-    // Sort snapshots chronologically
     const sorted = [...this.snapshots].sort((a, b) => a.scanned_at - b.scanned_at);
     const times = sorted.map(s => s.scanned_at);
     const bytes = sorted.map(s => s.total_bytes);
 
-    // Simple Linear Regression: y = m*x + c
     const n = sorted.length;
     const minT = times[0];
     const maxT = times[n - 1];
-    const timeSpan = maxT - minT || 86400; // avoid 0
 
     let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
     for (let i = 0; i < n; i++) {
-      const x = (times[i] - minT) / 86400; // days from start
+      const x = (times[i] - minT) / 86400; // days
       const y = bytes[i];
       sumX += x;
       sumY += y;
@@ -496,49 +603,44 @@ class StorageApp {
       sumXX += x * x;
     }
 
-    const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX || 1); // bytes per day
+    const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX || 1);
     const intercept = (sumY - slope * sumX) / n;
 
-    // Daily growth metric
-    const dailyGrowth = Math.max(slope, 1024 * 1024); // at least 1MB/day baseline
+    const dailyGrowth = Math.max(slope, 1024 * 1024);
     document.getElementById('forecast-daily-growth').innerText = `${this.formatBytes(dailyGrowth)} / day`;
 
-    // Estimate Days until disk full (assuming standard 100GB or 500GB volume for demo)
     const currentBytes = bytes[bytes.length - 1];
-    const assumedCapacity = Math.max(currentBytes * 1.5, 100 * 1024 * 1024 * 1024);
+    const assumedCapacity = Math.max(currentBytes * 1.4, 120 * 1024 * 1024 * 1024);
     const remainingBytes = assumedCapacity - currentBytes;
     const daysUntilFull = Math.max(Math.round(remainingBytes / dailyGrowth), 14);
 
     document.getElementById('forecast-days-until-full').innerText = `${daysUntilFull} Days`;
 
-    // Draw Smooth Canvas Line Chart
-    this.drawForecastChart(ctx, width, height, sorted, slope, intercept, minT, assumedCapacity);
-
-    // Render AI Recommendation Cards
+    this.drawForecastChart(ctx, cssWidth, cssHeight, sorted, slope, intercept, minT, assumedCapacity);
     this.renderAiRecommendations(dailyGrowth, daysUntilFull);
   }
 
   drawEmptyForecast(ctx, width, height) {
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.02)';
     ctx.fillRect(0, 0, width, height);
 
-    ctx.fillStyle = '#64748b';
-    ctx.font = '14px Inter, sans-serif';
+    ctx.fillStyle = 'rgba(235, 235, 245, 0.45)';
+    ctx.font = '500 13px Inter, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('Execute multiple scans across directories to record time-series snapshots for ML modeling.', width / 2, height / 2);
+    ctx.fillText('Perform scans across multiple directories to build time-series snapshots for AI growth modeling.', width / 2, height / 2);
   }
 
-  drawForecastChart(ctx, width, height, snapshots, slope, intercept, minT, capacity) {
-    const padX = 60;
-    const padY = 40;
+  drawForecastChart(ctx, width, height, snapshots, slope, intercept, minT) {
+    const padX = 64;
+    const padY = 36;
     const plotW = width - padX * 2;
     const plotH = height - padY * 2;
 
     const maxBytes = Math.max(...snapshots.map(s => s.total_bytes)) * 1.25;
     const minBytes = Math.min(...snapshots.map(s => s.total_bytes)) * 0.85;
 
-    // Draw Grid Lines
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+    // Grid lines
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
     ctx.lineWidth = 1;
     for (let i = 0; i <= 4; i++) {
       const y = padY + (plotH / 4) * i;
@@ -548,7 +650,7 @@ class StorageApp {
       ctx.stroke();
 
       const labelVal = maxBytes - (i / 4) * (maxBytes - minBytes);
-      ctx.fillStyle = '#64748b';
+      ctx.fillStyle = 'rgba(235, 235, 245, 0.45)';
       ctx.font = '10px JetBrains Mono';
       ctx.textAlign = 'right';
       ctx.fillText(this.formatBytes(labelVal), padX - 10, y + 3);
@@ -557,40 +659,63 @@ class StorageApp {
     // Historical Points Path
     const points = snapshots.map((s, i) => {
       const xRatio = snapshots.length > 1 ? i / (snapshots.length - 1) : 0;
-      const x = padX + (plotW * 0.6) * xRatio;
-      const yRatio = (s.total_bytes - minBytes) / (maxBytes - minBytes);
+      const x = padX + (plotW * 0.58) * xRatio;
+      const yRatio = (s.total_bytes - minBytes) / (maxBytes - minBytes || 1);
       const y = height - padY - (plotH * yRatio);
       return { x, y, bytes: s.total_bytes, time: s.scanned_at };
     });
 
-    // Draw Historical Line (Cyan)
+    // Area Fill Gradient below Historical Curve
+    const grad = ctx.createLinearGradient(0, padY, 0, height - padY);
+    grad.addColorStop(0, 'rgba(50, 173, 230, 0.25)');
+    grad.addColorStop(1, 'rgba(50, 173, 230, 0.0)');
+
     ctx.beginPath();
-    ctx.strokeStyle = '#00f0ff';
-    ctx.lineWidth = 3;
+    points.forEach((p, idx) => {
+      if (idx === 0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
+    });
+    ctx.lineTo(points[points.length - 1].x, height - padY);
+    ctx.lineTo(points[0].x, height - padY);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Draw Historical Line (Cyan/Blue)
+    ctx.beginPath();
+    ctx.strokeStyle = '#32ade6';
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
     points.forEach((p, idx) => {
       if (idx === 0) ctx.moveTo(p.x, p.y);
       else ctx.lineTo(p.x, p.y);
     });
     ctx.stroke();
 
-    // Draw Historical Dots
+    // Draw Historical Dot Pills
     points.forEach(p => {
-      ctx.fillStyle = '#00f0ff';
+      ctx.fillStyle = '#12141a';
       ctx.beginPath();
       ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#32ade6';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2);
       ctx.fill();
     });
 
     // Projected Future Line (Purple Dashed)
     const lastPoint = points[points.length - 1];
     const projectX = width - padX;
-    const projectBytes = lastPoint.bytes + slope * 30; // 30 day forecast
-    const projectYRatio = (projectBytes - minBytes) / (maxBytes - minBytes);
+    const projectBytes = lastPoint.bytes + slope * 30;
+    const projectYRatio = (projectBytes - minBytes) / (maxBytes - minBytes || 1);
     const projectY = Math.max(padY, height - padY - (plotH * projectYRatio));
 
     ctx.save();
-    ctx.setLineDash([6, 6]);
-    ctx.strokeStyle = '#a855f7';
+    ctx.setLineDash([5, 5]);
+    ctx.strokeStyle = '#af52de';
     ctx.lineWidth = 2.5;
     ctx.beginPath();
     ctx.moveTo(lastPoint.x, lastPoint.y);
@@ -598,16 +723,21 @@ class StorageApp {
     ctx.stroke();
     ctx.restore();
 
-    // Projected Endpoint Indicator
-    ctx.fillStyle = '#a855f7';
+    // Projected Dot Pill
+    ctx.fillStyle = '#12141a';
     ctx.beginPath();
     ctx.arc(projectX, projectY, 6, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = '#a855f7';
-    ctx.font = '11px Outfit, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText(`+30d Forecast (${this.formatBytes(projectBytes)})`, projectX - 120, projectY - 10);
+    ctx.fillStyle = '#af52de';
+    ctx.beginPath();
+    ctx.arc(projectX, projectY, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#af52de';
+    ctx.font = '600 11px Outfit, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(`+30d Horizon (${this.formatBytes(projectBytes)})`, projectX - 12, projectY - 8);
   }
 
   renderAiRecommendations(dailyGrowth, daysUntilFull) {
@@ -619,25 +749,22 @@ class StorageApp {
 
     const recs = [
       {
-        title: 'High-Impact Duplicate Reclamation',
-        desc: `Purging identical file clones will instantly release ${this.formatBytes(dupWaste)} without any data loss.`,
-        action: 'Review Duplicates',
-        tab: 'duplicates',
-        color: 'purple'
+        title: 'High-Yield Deduplication',
+        desc: `Purging identical file clones will release ${this.formatBytes(dupWaste)} of disk space instantly.`,
+        action: 'Review Clones',
+        tab: 'duplicates'
       },
       {
-        title: 'Inactive Build Cache Clean',
-        desc: `Identified ${this.formatBytes(staleWaste)} of logs and caches inactive for over 30 days.`,
-        action: 'Inspect Stale Junk',
-        tab: 'stale',
-        color: 'amber'
+        title: 'Prune Inactive Build Artifacts',
+        desc: `Identified ${this.formatBytes(staleWaste)} of unreferenced cache and log files older than 30 days.`,
+        action: 'Inspect Stale',
+        tab: 'stale'
       },
       {
-        title: 'Disk Capacity Runway',
-        desc: `At current growth rate of ${this.formatBytes(dailyGrowth)}/day, storage limit will be reached in ${daysUntilFull} days.`,
-        action: 'Configure Alerts',
-        tab: 'scanner',
-        color: 'cyan'
+        title: 'Capacity Runway Projection',
+        desc: `At current growth of ${this.formatBytes(dailyGrowth)}/day, storage exhaustion occurs in ${daysUntilFull} days.`,
+        action: 'Scan Now',
+        tab: 'scanner'
       }
     ];
 
@@ -647,7 +774,7 @@ class StorageApp {
           <h4>${r.title}</h4>
           <p>${r.desc}</p>
         </div>
-        <div class="ai-rec-footer">
+        <div>
           <button class="btn btn-sm btn-secondary" onclick="app.switchTab('${r.tab}')">${r.action}</button>
         </div>
       </div>
@@ -668,7 +795,7 @@ class StorageApp {
     const workers = workerInput ? parseInt(workerInput.value) || 12 : 12;
 
     if (!path) {
-      this.showToast('Please enter a valid directory path to scan.', 'warning');
+      this.showToast('Please enter or choose a valid directory path to scan.', 'warning');
       return;
     }
 
@@ -679,7 +806,7 @@ class StorageApp {
       const progressBox = document.getElementById('scan-progress-box');
       if (progressBox) progressBox.style.display = 'block';
 
-      const resp = await this.apiRequest('/scan', {
+      await this.apiRequest('/scan', {
         method: 'POST',
         body: JSON.stringify({ path, workers })
       });
@@ -703,10 +830,9 @@ class StorageApp {
         const statsText = document.getElementById('scan-stats-text');
 
         if (status.is_scanning) {
-          if (statusText) statusText.innerText = `Scanning: ${status.target_path}...`;
-          if (statsText) statsText.innerText = `${status.files_scanned.toLocaleString()} files scanned`;
+          if (statusText) statusText.innerText = `Indexing: ${status.target_path}...`;
+          if (statsText) statsText.innerText = `${status.files_scanned.toLocaleString()} files indexed`;
         } else {
-          // Finished
           clearInterval(this.scanPollTimer);
           const btn = document.getElementById('btn-start-scan');
           if (btn) btn.disabled = false;
@@ -723,16 +849,16 @@ class StorageApp {
     }, 800);
   }
 
-  // --- Action & Deletion Modal Engine ---
+  // --- Modal & Action Execution ---
 
   promptTrashSelected(source) {
     const selected = this.getSelectedFiles(source);
     if (selected.length === 0) return;
 
     this.openModal({
-      title: 'Move Selected Files to OS Trash',
-      message: `You are about to relocate ${selected.length} file(s) (${this.formatBytes(selected.reduce((a, f) => a + f.size, 0))}) to FreeDesktop.org OS Native Trash.`,
-      warning: 'Files can be restored to disk at any time from the Trash & Audit log or file manager.',
+      title: 'Move Files to FreeDesktop Trash',
+      message: `You are about to relocate ${selected.length} file(s) (${this.formatBytes(selected.reduce((a, f) => a + f.size, 0))}) to FreeDesktop OS Native Trash.`,
+      warning: 'Files can be restored to disk at any time from the Trash & Audit log or system file manager.',
       mode: 'trash',
       files: selected
     });
@@ -743,9 +869,9 @@ class StorageApp {
     if (selected.length === 0) return;
 
     this.openModal({
-      title: 'Permanently Destroy Selected Files',
-      message: `You are about to PERMANENTLY DELETE ${selected.length} file(s) (${this.formatBytes(selected.reduce((a, f) => a + f.size, 0))}).`,
-      warning: '⚠️ WARNING: This operation is irreversible and directly executes os.Remove on the kernel filesystem.',
+      title: 'Permanently Destroy Files',
+      message: `You are about to PERMANENTLY DESTROY ${selected.length} file(s) (${this.formatBytes(selected.reduce((a, f) => a + f.size, 0))}).`,
+      warning: '⚠️ WARNING: This operation is irreversible and directly invokes os.Remove on the kernel filesystem.',
       mode: 'permanent',
       files: selected
     });
@@ -764,12 +890,24 @@ class StorageApp {
   openModal({ title, message, warning, mode, files }) {
     this.pendingAction = { mode, files, ids: files.map(f => f.id) };
 
-    document.getElementById('modal-title').innerText = title;
-    document.getElementById('modal-message').innerText = message;
-    document.getElementById('modal-warning-text').innerText = warning;
+    const titleEl = document.getElementById('modal-title');
+    const msgEl = document.getElementById('modal-message');
+    const warnEl = document.getElementById('modal-warning-text');
+    const confirmBtn = document.getElementById('btn-modal-confirm');
+
+    if (titleEl) titleEl.innerText = title;
+    if (msgEl) msgEl.innerText = message;
+    if (warnEl) warnEl.innerText = warning;
+
+    if (confirmBtn) {
+      confirmBtn.className = mode === 'permanent' ? 'btn btn-danger' : 'btn btn-primary';
+      confirmBtn.innerText = mode === 'permanent' ? 'Permanently Delete' : 'Move to Trash';
+    }
 
     const preview = document.getElementById('modal-file-list');
-    preview.innerHTML = files.map(f => `<div>• ${f.path} (${this.formatBytes(f.size)})</div>`).join('');
+    if (preview) {
+      preview.innerHTML = files.map(f => `<div>• ${f.path} (${this.formatBytes(f.size)})</div>`).join('');
+    }
 
     const modal = document.getElementById('action-modal');
     if (modal) modal.style.display = 'flex';
@@ -798,26 +936,56 @@ class StorageApp {
       if (resp.success) {
         this.showToast(`Successfully processed ${resp.processed_count} files (Freed ${this.formatBytes(resp.freed_bytes)})`, 'success');
         this.loadAllData();
+      } else {
+        this.showToast(`Action finished with warnings.`, 'warning');
       }
     } catch (err) {
-      this.showToast(`Cleanup action failed: ${err.message}`, 'error');
+      this.showToast(`Action failed: ${err.message}`, 'error');
     }
   }
 
   async restoreAction(actionId) {
     try {
-      this.showToast(`Restoring file for Action #${actionId}...`, 'info');
-      const resp = await this.apiRequest(`/actions/restore?id=${actionId}`, { method: 'POST' });
+      this.showToast(`Restoring file from audit action #${actionId}...`, 'info');
+      const resp = await this.apiRequest('/actions/restore', {
+        method: 'POST',
+        body: JSON.stringify({ action_id: actionId })
+      });
+
       if (resp.success) {
-        this.showToast(`Restored: ${resp.restored.file_path}`, 'success');
+        this.showToast(`Successfully restored: ${resp.restored_path}`, 'success');
         this.loadAllData();
       }
     } catch (err) {
-      this.showToast(`Restoration failed: ${err.message}`, 'error');
+      this.showToast(`Restore failed: ${err.message}`, 'error');
     }
   }
 
-  // --- UI Helpers ---
+  // --- Utilities & Formatters ---
+
+  renderCategoryBadge(category) {
+    const map = {
+      user: '<span class="badge badge-secondary">User File</span>',
+      system_protected: '<span class="badge badge-purple">Protected</span>',
+      system_log: '<span class="badge badge-amber">System Log</span>',
+      temp: '<span class="badge badge-rose">Temp Junk</span>',
+      crash_dump: '<span class="badge badge-rose">Crash Dump</span>',
+      system_cache: '<span class="badge badge-green">Cache</span>'
+    };
+    return map[category] || `<span class="badge">${category}</span>`;
+  }
+
+  formatCategoryName(cat) {
+    const map = {
+      user: 'User Documents & Media',
+      system_protected: 'System Protected Core',
+      system_log: 'System Logs & Journals',
+      temp: 'Temporary Workspaces',
+      crash_dump: 'Kernel / App Crash Dumps',
+      system_cache: 'Build & Application Caches'
+    };
+    return map[cat] || cat;
+  }
 
   formatBytes(bytes) {
     if (!bytes || bytes === 0) return '0 B';
@@ -827,34 +995,15 @@ class StorageApp {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
 
-  formatTimestamp(unixSec) {
-    if (!unixSec) return '--';
-    const date = new Date(unixSec * 1000);
-    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  }
-
-  formatCategoryName(cat) {
-    const names = {
-      user: 'User Documents & Media',
-      system_protected: 'OS Core (Protected)',
-      system_log: 'System & Git Logs',
-      temp: 'Temporary Files',
-      crash_dump: 'Crash Dumps',
-      system_cache: 'Caches & Node Modules'
-    };
-    return names[cat] || cat;
-  }
-
-  renderCategoryBadge(cat) {
-    const badges = {
-      user: '<span class="badge">User</span>',
-      system_protected: '<span class="badge badge-purple">Protected</span>',
-      system_log: '<span class="badge badge-amber">Log</span>',
-      temp: '<span class="badge badge-rose">Temp</span>',
-      crash_dump: '<span class="badge badge-amber">Crash Dump</span>',
-      system_cache: '<span class="badge badge-emerald">Cache</span>'
-    };
-    return badges[cat] || `<span class="badge">${cat}</span>`;
+  formatTimestamp(sec) {
+    if (!sec) return '--';
+    const date = new Date(sec * 1000);
+    return date.toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
   }
 
   showToast(message, type = 'info') {
@@ -863,17 +1012,26 @@ class StorageApp {
 
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
-    toast.innerHTML = `<span>${message}</span>`;
+
+    const icons = {
+      success: '✓',
+      warning: '⚠️',
+      error: '✕',
+      info: 'ℹ️'
+    };
+
+    toast.innerHTML = `<span>${icons[type] || 'ℹ️'}</span><span>${message}</span>`;
     container.appendChild(toast);
 
     setTimeout(() => {
       toast.style.opacity = '0';
-      toast.style.transform = 'translateX(100%)';
-      setTimeout(() => toast.remove(), 300);
+      toast.style.transform = 'translateY(8px)';
+      toast.style.transition = 'all 0.25s ease';
+      setTimeout(() => toast.remove(), 250);
     }, 3500);
   }
 }
 
-// Global instance for inline button callbacks
-const app = new StorageApp();
-window.app = app;
+// Global App Instance
+window.app = new StorageApp();
+export default window.app;
