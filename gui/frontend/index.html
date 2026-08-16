@@ -61,7 +61,7 @@
         </button>
 
         <button class="nav-item" data-tab="duplicates" id="nav-duplicates">
-          <div class="nav-icon-box purple">
+          <div class="nav-icon-box yellow">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
@@ -168,18 +168,18 @@
             <div class="storage-bar-wrapper">
               <div class="storage-bar" id="storage-multi-bar">
                 <div class="bar-segment user" style="width: 50%" title="User Files"></div>
-                <div class="bar-segment sys" style="width: 25%" title="System Protected"></div>
                 <div class="bar-segment cache" style="width: 10%" title="Cache & Temp"></div>
                 <div class="bar-segment dup" style="width: 15%" title="Duplicate Copies"></div>
+                <div class="bar-segment sys" style="width: 25%" title="System Protected"></div>
               </div>
             </div>
 
             <!-- Segment Legend Chips -->
             <div class="storage-bar-legend" id="storage-bar-chips">
               <div class="chip-item"><span class="dot user"></span><span class="name">User Data</span><span class="val" id="bar-val-user">--</span></div>
-              <div class="chip-item"><span class="dot sys"></span><span class="name">System Protected</span><span class="val" id="bar-val-sys">--</span></div>
               <div class="chip-item"><span class="dot cache"></span><span class="name">Logs & Cache</span><span class="val" id="bar-val-cache">--</span></div>
               <div class="chip-item"><span class="dot dup"></span><span class="name">Duplicate Copies</span><span class="val" id="bar-val-dup">--</span></div>
+              <div class="chip-item"><span class="dot sys"></span><span class="name">System Protected</span><span class="val" id="bar-val-sys">--</span></div>
             </div>
           </div>
 
@@ -201,14 +201,14 @@
             <div class="metric-card frosted-card">
               <div class="metric-header">
                 <span class="metric-label">Duplicate Copies</span>
-                <div class="metric-icon-bubble purple">
+                <div class="metric-icon-bubble yellow">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                   </svg>
                 </div>
               </div>
-              <div class="metric-value text-purple" id="stat-duplicate-bytes">--</div>
+              <div class="metric-value text-yellow" id="stat-duplicate-bytes">--</div>
               <div class="metric-footnote" id="stat-duplicate-count">-- redundant files</div>
             </div>
 
@@ -277,7 +277,7 @@
               </div>
               <div class="recommendations-list" id="dashboard-recommendations">
                 <div class="rec-item">
-                  <div class="rec-icon-wrap purple">
+                  <div class="rec-icon-wrap yellow">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
                   </div>
                   <div class="rec-content">

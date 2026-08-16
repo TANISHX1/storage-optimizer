@@ -1,68 +1,93 @@
 /* ==========================================================================
-   Apple Human Interface Guidelines (HIG) — macOS Pro Design System
+   Apple Human Interface Guidelines (HIG) — macOS Dark Mode Design System
    Intelligent Storage Optimizer
+   
+   Color Reference: developer.apple.com/design/human-interface-guidelines/color
+   Dark Mode:       developer.apple.com/design/human-interface-guidelines/dark-mode
+   Layout:          developer.apple.com/design/human-interface-guidelines/layout
+   Icons:           developer.apple.com/design/human-interface-guidelines/icons
+   
+   Background Hierarchy (Apple Dark Mode resolved values):
+     Level 0 — systemBackground:          #000000
+     Level 1 — secondarySystemBackground: #1c1c1e
+     Level 2 — tertiarySystemBackground:  #2c2c2e
+     Elevated (sheets/modals):            #2c2c2e / #3a3a3c
+   
+   System Gray Scale (Dark Mode):
+     systemGray:  #8e8e93
+     systemGray2: #636366
+     systemGray3: #48484a
+     systemGray4: #3a3a3c
+     systemGray5: #2c2c2e
+     systemGray6: #1c1c1e
    ========================================================================== */
 
 :root {
-  /* macOS Vibrant Dark Mode Color Palette (HIG System Colors) */
-  --sys-bg-base: #12141a;
-  --sys-bg-sidebar: rgba(22, 25, 34, 0.85);
-  --sys-bg-toolbar: rgba(18, 20, 26, 0.82);
-  --sys-bg-surface: rgba(30, 34, 46, 0.65);
-  --sys-bg-surface-hover: rgba(42, 48, 64, 0.75);
-  --sys-bg-card: rgba(26, 30, 42, 0.68);
-  --sys-bg-inset: rgba(10, 12, 16, 0.55);
+  /* ─── macOS Dark Mode Background Hierarchy (Exact HIG Values) ─── */
+  --sys-bg-base:          #000000;                       /* systemBackground (base window) */
+  --sys-bg-sidebar:       #1c1c1e;                       /* secondarySystemBackground */
+  --sys-bg-toolbar:       rgba(28, 28, 30, 0.88);        /* blurred toolbar over base */
+  --sys-bg-surface:       #1c1c1e;                       /* elevated group bg */
+  --sys-bg-surface-hover: #2c2c2e;                       /* tertiarySystemBackground (hover) */
+  --sys-bg-card:          #1c1c1e;                       /* grouped card surface */
+  --sys-bg-inset:         rgba(0, 0, 0, 0.35);           /* inset / recessed area */
+  --sys-bg-elevated:      #2c2c2e;                       /* elevated sheets/popovers */
 
-  /* Hairline Borders & Specular Highlights */
-  --border-hairline: rgba(255, 255, 255, 0.08);
-  --border-hairline-bright: rgba(255, 255, 255, 0.14);
-  --border-focus: rgba(0, 122, 255, 0.55);
-  --specular-top: inset 0 1px 0 rgba(255, 255, 255, 0.12);
-  --specular-subtle: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  /* ─── HIG Separator & Border Colors ─── */
+  --border-hairline:        rgba(84, 84, 88, 0.65);      /* separator (default) */
+  --border-hairline-bright: rgba(84, 84, 88, 0.85);      /* opaqueSeparator */
+  --border-focus:           rgba(10, 132, 255, 0.6);      /* focus ring (systemBlue) */
+  --specular-top:           inset 0 0.5px 0 rgba(255, 255, 255, 0.08);
+  --specular-subtle:        inset 0 0.5px 0 rgba(255, 255, 255, 0.04);
 
-  /* Apple HIG System Tints */
-  --apple-blue: #007aff;
-  --apple-blue-hover: #0066d6;
-  --apple-cyan: #32ade6;
-  --apple-teal: #30b0c7;
-  --apple-mint: #00c7be;
-  --apple-green: #34c759;
-  --apple-yellow: #ffcc00;
-  --apple-orange: #ff9500;
-  --apple-amber: #f59e0b;
-  --apple-red: #ff3b30;
-  --apple-purple: #af52de;
-  --apple-indigo: #5856d6;
-  --apple-pink: #ff2d55;
-  --apple-gray: #8e8e93;
+  /* ─── Apple HIG System Tints (Dark Mode Variants — increased vibrancy) ─── */
+  --apple-blue:       #0a84ff;     /* systemBlue (dark) */
+  --apple-blue-hover: #409cff;     /* systemBlue brighter on hover */
+  --apple-cyan:       #64d2ff;     /* systemCyan (dark) */
+  --apple-teal:       #6ac4dc;     /* systemTeal (dark) */
+  --apple-mint:       #63e6e2;     /* systemMint (dark) */
+  --apple-green:      #30d158;     /* systemGreen (dark) */
+  --apple-yellow:     #ffd60a;     /* systemYellow (dark) */
+  --apple-orange:     #ff9f0a;     /* systemOrange (dark) */
+  --apple-red:        #ff453a;     /* systemRed (dark) */
+  --apple-purple:     #bf5af2;     /* systemPurple (dark) */
+  --apple-indigo:     #5e5ce6;     /* systemIndigo (dark) */
+  --apple-pink:       #ff375f;     /* systemPink (dark) */
+  --apple-gray:       #98989d;     /* systemGray (dark) */
+  --apple-gray2:      #636366;     /* systemGray2 (dark) */
+  --apple-gray3:      #48484a;     /* systemGray3 (dark) */
+  --apple-gray4:      #3a3a3c;     /* systemGray4 (dark) */
+  --apple-gray5:      #2c2c2e;     /* systemGray5 (dark) */
+  --apple-gray6:      #1c1c1e;     /* systemGray6 (dark) */
 
-  /* Typography Scale */
+  /* ─── Typography Scale (HIG: SF Pro + Mono fallbacks) ─── */
   --font-display: 'Outfit', -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
-  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
-  --font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Monaco, monospace;
+  --font-body:    'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+  --font-mono:    'JetBrains Mono', 'SF Mono', Menlo, Monaco, monospace;
 
-  /* Text Hierarchy (HIG Labels) */
-  --text-primary: #ffffff;
-  --text-secondary: rgba(235, 235, 245, 0.72);
-  --text-tertiary: rgba(235, 235, 245, 0.45);
-  --text-quaternary: rgba(235, 235, 245, 0.25);
+  /* ─── HIG Label Hierarchy (Exact Dark Mode opacities) ─── */
+  --text-primary:    #ffffff;                      /* label (primary) */
+  --text-secondary:  rgba(235, 235, 245, 0.60);   /* secondaryLabel */
+  --text-tertiary:   rgba(235, 235, 245, 0.30);   /* tertiaryLabel */
+  --text-quaternary: rgba(235, 235, 245, 0.18);   /* quaternaryLabel */
 
-  /* Radius & Shadows */
-  --radius-xs: 5px;
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 18px;
-  --radius-xl: 24px;
+  /* ─── Radius (macOS standard continuous corners) ─── */
+  --radius-xs:   4px;
+  --radius-sm:   6px;
+  --radius-md:   10px;
+  --radius-lg:   14px;
+  --radius-xl:   20px;
   --radius-full: 9999px;
 
-  --shadow-window: 0 24px 60px rgba(0, 0, 0, 0.65), 0 0 1px rgba(255, 255, 255, 0.15);
-  --shadow-card: 0 8px 24px -4px rgba(0, 0, 0, 0.35);
-  --shadow-modal: 0 32px 72px -8px rgba(0, 0, 0, 0.8), 0 0 1px rgba(255, 255, 255, 0.2);
+  /* ─── Shadows (macOS Dark — deeper, less visible stroke) ─── */
+  --shadow-window: 0 20px 60px rgba(0, 0, 0, 0.75);
+  --shadow-card:   0 2px 8px rgba(0, 0, 0, 0.45);
+  --shadow-modal:  0 28px 60px -8px rgba(0, 0, 0, 0.85), 0 0 0 0.5px rgba(255, 255, 255, 0.1);
 
-  /* Apple Signature Physics Timing */
-  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
-  --transition-fast: 0.18s var(--ease-spring);
-  --transition-smooth: 0.28s var(--ease-spring);
+  /* ─── Apple Motion Timing (UIKit spring interpolation) ─── */
+  --ease-spring:       cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-fast:   0.15s var(--ease-spring);
+  --transition-smooth: 0.25s var(--ease-spring);
 }
 
 /* Reset & Global Base */
@@ -85,30 +110,7 @@ body {
   user-select: none;
 }
 
-/* Subtle Ambient Desktop Glow */
-body::before {
-  content: '';
-  position: fixed;
-  top: -15%;
-  left: 25%;
-  width: 650px;
-  height: 650px;
-  background: radial-gradient(circle, rgba(0, 122, 255, 0.07) 0%, transparent 65%);
-  pointer-events: none;
-  z-index: 0;
-}
-
-body::after {
-  content: '';
-  position: fixed;
-  bottom: -15%;
-  right: 15%;
-  width: 650px;
-  height: 650px;
-  background: radial-gradient(circle, rgba(175, 82, 222, 0.05) 0%, transparent 65%);
-  pointer-events: none;
-  z-index: 0;
-}
+/* No ambient glow — HIG Dark Mode uses pure neutral surfaces, not tinted light bleed */
 
 /* App Window Frame (macOS Desktop Container) */
 .window-frame {
@@ -125,14 +127,13 @@ body::after {
    ========================================================================== */
 
 .sidebar {
-  width: 250px;
+  width: 240px;
   background: var(--sys-bg-sidebar);
   border-right: 1px solid var(--border-hairline);
-  backdrop-filter: blur(28px) saturate(190%);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  padding: 16px 12px 14px 12px;
+  padding: 14px 10px 12px 10px;
   position: relative;
   z-index: 20;
 }
@@ -172,7 +173,7 @@ body::after {
   height: 32px;
   border-radius: var(--radius-sm);
   background: linear-gradient(135deg, var(--apple-blue), var(--apple-indigo));
-  box-shadow: 0 2px 10px rgba(0, 122, 255, 0.35), var(--specular-top);
+  box-shadow: 0 2px 8px rgba(10, 132, 255, 0.3);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -250,12 +251,14 @@ body::after {
   height: 15px;
 }
 
-.nav-icon-box.blue { background: rgba(0, 122, 255, 0.15); color: var(--apple-blue); }
-.nav-icon-box.cyan { background: rgba(50, 173, 230, 0.15); color: var(--apple-cyan); }
-.nav-icon-box.purple { background: rgba(175, 82, 222, 0.15); color: var(--apple-purple); }
-.nav-icon-box.amber { background: rgba(255, 149, 0, 0.15); color: var(--apple-orange); }
-.nav-icon-box.mint { background: rgba(0, 199, 190, 0.15); color: var(--apple-mint); }
-.nav-icon-box.gray { background: rgba(142, 142, 147, 0.15); color: var(--apple-gray); }
+.nav-icon-box.blue   { background: rgba(10, 132, 255, 0.18); color: var(--apple-blue); }
+.nav-icon-box.cyan   { background: rgba(100, 210, 255, 0.15); color: var(--apple-cyan); }
+.nav-icon-box.purple { background: rgba(191, 90, 242, 0.18); color: var(--apple-purple); }
+.nav-icon-box.amber  { background: rgba(255, 159, 10, 0.18); color: var(--apple-orange); }
+.nav-icon-box.yellow { background: rgba(255, 214, 10, 0.18); color: var(--apple-yellow); }
+.nav-icon-box.red    { background: rgba(255, 69, 58, 0.18); color: var(--apple-red); }
+.nav-icon-box.mint   { background: rgba(99, 230, 226, 0.15); color: var(--apple-mint); }
+.nav-icon-box.gray   { background: rgba(152, 152, 157, 0.15); color: var(--apple-gray); }
 
 .nav-item:hover {
   background: var(--sys-bg-surface-hover);
@@ -263,11 +266,10 @@ body::after {
 }
 
 .nav-item.active {
-  background: rgba(0, 122, 255, 0.18);
-  border-color: rgba(0, 122, 255, 0.3);
+  background: rgba(10, 132, 255, 0.2);
+  border-color: rgba(10, 132, 255, 0.35);
   color: #ffffff;
   font-weight: 600;
-  box-shadow: var(--specular-subtle);
 }
 
 .nav-item.active .nav-icon-box {
@@ -286,7 +288,7 @@ body::after {
 }
 
 .nav-badge.warning {
-  background: rgba(255, 149, 0, 0.2);
+  background: rgba(255, 159, 10, 0.2);
   color: var(--apple-orange);
 }
 
@@ -317,7 +319,7 @@ body::after {
 
 .status-indicator-dot.online {
   background: var(--apple-green);
-  box-shadow: 0 0 8px rgba(52, 199, 89, 0.6);
+  box-shadow: 0 0 6px rgba(48, 209, 88, 0.5);
 }
 
 .status-indicator-dot.online::after {
@@ -431,25 +433,24 @@ body::after {
   stroke-width: 2;
 }
 
-/* macOS Primary Button (System Blue) */
+/* macOS Primary Button (System Blue — Dark) */
 .btn-primary {
-  background: linear-gradient(180deg, var(--apple-blue), var(--apple-blue-hover));
+  background: var(--apple-blue);
   color: #ffffff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4), var(--specular-top);
-  border: 1px solid rgba(0, 122, 255, 0.5);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  border: none;
 }
 
 .btn-primary:hover {
-  background: linear-gradient(180deg, #1a87ff, var(--apple-blue));
-  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.4), var(--specular-top);
+  background: var(--apple-blue-hover);
+  box-shadow: 0 2px 8px rgba(10, 132, 255, 0.35);
 }
 
 /* macOS Secondary Neutral Button */
 .btn-secondary {
-  background: var(--sys-bg-surface);
+  background: var(--apple-gray4);
   border: 1px solid var(--border-hairline);
   color: var(--text-primary);
-  box-shadow: var(--specular-subtle);
 }
 
 .btn-secondary:hover {
@@ -457,27 +458,25 @@ body::after {
   border-color: var(--border-hairline-bright);
 }
 
-/* macOS Warning & Destructive Buttons */
+/* macOS Warning & Destructive Buttons (Dark Tints) */
 .btn-warning {
-  background: rgba(255, 149, 0, 0.15);
-  border: 1px solid rgba(255, 149, 0, 0.35);
-  color: #ffb340;
+  background: rgba(255, 159, 10, 0.18);
+  border: 1px solid rgba(255, 159, 10, 0.35);
+  color: var(--apple-orange);
 }
 
 .btn-warning:hover:not(:disabled) {
-  background: rgba(255, 149, 0, 0.25);
-  box-shadow: 0 2px 10px rgba(255, 149, 0, 0.25);
+  background: rgba(255, 159, 10, 0.3);
 }
 
 .btn-danger {
-  background: rgba(255, 59, 48, 0.15);
-  border: 1px solid rgba(255, 59, 48, 0.35);
-  color: #ff6961;
+  background: rgba(255, 69, 58, 0.18);
+  border: 1px solid rgba(255, 69, 58, 0.35);
+  color: var(--apple-red);
 }
 
 .btn-danger:hover:not(:disabled) {
-  background: rgba(255, 59, 48, 0.25);
-  box-shadow: 0 2px 10px rgba(255, 59, 48, 0.25);
+  background: rgba(255, 69, 58, 0.3);
 }
 
 .btn-lg {
@@ -527,13 +526,12 @@ body::after {
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* Frosted Glass Card */
+/* Grouped Card Surface (HIG: elevated grouped content) */
 .frosted-card {
   background: var(--sys-bg-card);
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-card), var(--specular-subtle);
-  backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: var(--shadow-card);
 }
 
 /* ==========================================================================
@@ -543,8 +541,8 @@ body::after {
 .mac-storage-hero {
   padding: 20px 24px;
   margin-bottom: 20px;
-  background: linear-gradient(180deg, rgba(35, 40, 56, 0.7), var(--sys-bg-card));
-  border: 1px solid var(--border-hairline-bright);
+  background: var(--sys-bg-elevated);
+  border: 1px solid var(--border-hairline);
 }
 
 .storage-hero-header {
@@ -574,8 +572,8 @@ body::after {
   font-size: 0.84rem;
   font-weight: 600;
   color: var(--apple-green);
-  background: rgba(52, 199, 89, 0.12);
-  border: 1px solid rgba(52, 199, 89, 0.25);
+  background: rgba(48, 209, 88, 0.12);
+  border: 1px solid rgba(48, 209, 88, 0.25);
   padding: 4px 12px;
   border-radius: var(--radius-full);
 }
@@ -601,10 +599,10 @@ body::after {
   position: relative;
 }
 
-.bar-segment.user { background: linear-gradient(180deg, #40a9ff, var(--apple-blue)); }
-.bar-segment.sys { background: linear-gradient(180deg, #c084fc, var(--apple-purple)); }
-.bar-segment.cache { background: linear-gradient(180deg, #fbbf24, var(--apple-orange)); }
-.bar-segment.dup { background: linear-gradient(180deg, #f87171, var(--apple-red)); }
+.bar-segment.user  { background: var(--apple-red); }
+.bar-segment.cache { background: var(--apple-orange); }
+.bar-segment.dup   { background: var(--apple-yellow); }
+.bar-segment.sys   { background: var(--apple-gray); }
 
 .storage-bar-legend {
   display: flex;
@@ -626,10 +624,10 @@ body::after {
   border-radius: 50%;
 }
 
-.chip-item .dot.user { background: var(--apple-blue); }
-.chip-item .dot.sys { background: var(--apple-purple); }
+.chip-item .dot.user  { background: var(--apple-red); }
 .chip-item .dot.cache { background: var(--apple-orange); }
-.chip-item .dot.dup { background: var(--apple-red); }
+.chip-item .dot.dup   { background: var(--apple-yellow); }
+.chip-item .dot.sys   { background: var(--apple-gray); }
 
 .chip-item .name { color: var(--text-secondary); }
 .chip-item .val { font-family: var(--font-mono); font-weight: 600; color: var(--text-primary); }
@@ -686,11 +684,13 @@ body::after {
   height: 14px;
 }
 
-.metric-icon-bubble.blue { background: rgba(0, 122, 255, 0.15); color: var(--apple-blue); }
-.metric-icon-bubble.purple { background: rgba(175, 82, 222, 0.15); color: var(--apple-purple); }
-.metric-icon-bubble.amber { background: rgba(255, 149, 0, 0.15); color: var(--apple-orange); }
-.metric-icon-bubble.green { background: rgba(52, 199, 89, 0.15); color: var(--apple-green); }
-.metric-icon-bubble.mint { background: rgba(0, 199, 190, 0.15); color: var(--apple-mint); }
+.metric-icon-bubble.blue   { background: rgba(10, 132, 255, 0.18); color: var(--apple-blue); }
+.metric-icon-bubble.purple { background: rgba(191, 90, 242, 0.18); color: var(--apple-purple); }
+.metric-icon-bubble.amber  { background: rgba(255, 159, 10, 0.18); color: var(--apple-orange); }
+.metric-icon-bubble.yellow { background: rgba(255, 214, 10, 0.18); color: var(--apple-yellow); }
+.metric-icon-bubble.red    { background: rgba(255, 69, 58, 0.18); color: var(--apple-red); }
+.metric-icon-bubble.green  { background: rgba(48, 209, 88, 0.18); color: var(--apple-green); }
+.metric-icon-bubble.mint   { background: rgba(99, 230, 226, 0.15); color: var(--apple-mint); }
 
 .metric-value {
   font-family: var(--font-display);
@@ -708,9 +708,12 @@ body::after {
 }
 
 .text-purple { color: var(--apple-purple) !important; }
+.text-yellow { color: var(--apple-yellow) !important; }
 .text-amber { color: var(--apple-orange) !important; }
 .text-green { color: var(--apple-green) !important; }
 .text-mint { color: var(--apple-mint) !important; }
+.text-red { color: var(--apple-red) !important; }
+.text-blue { color: var(--apple-blue) !important; }
 
 /* ==========================================================================
    Dashboard Distribution Panels
@@ -762,11 +765,11 @@ body::after {
   border-color: var(--border-hairline);
 }
 
-.badge-green { background: rgba(52, 199, 89, 0.15); color: var(--apple-green); border-color: rgba(52, 199, 89, 0.25); }
-.badge-purple { background: rgba(175, 82, 222, 0.15); color: var(--apple-purple); border-color: rgba(175, 82, 222, 0.25); }
-.badge-amber { background: rgba(255, 149, 0, 0.15); color: var(--apple-orange); border-color: rgba(255, 149, 0, 0.25); }
-.badge-rose { background: rgba(255, 59, 48, 0.15); color: var(--apple-red); border-color: rgba(255, 59, 48, 0.25); }
-.badge-mint { background: rgba(0, 199, 190, 0.15); color: var(--apple-mint); border-color: rgba(0, 199, 190, 0.25); }
+.badge-green  { background: rgba(48, 209, 88, 0.15); color: var(--apple-green); border-color: rgba(48, 209, 88, 0.25); }
+.badge-purple { background: rgba(191, 90, 242, 0.15); color: var(--apple-purple); border-color: rgba(191, 90, 242, 0.25); }
+.badge-amber  { background: rgba(255, 159, 10, 0.15); color: var(--apple-orange); border-color: rgba(255, 159, 10, 0.25); }
+.badge-rose   { background: rgba(255, 69, 58, 0.15); color: var(--apple-red); border-color: rgba(255, 69, 58, 0.25); }
+.badge-mint   { background: rgba(99, 230, 226, 0.15); color: var(--apple-mint); border-color: rgba(99, 230, 226, 0.25); }
 
 /* Category Donut Breakdown */
 .category-breakdown-body {
@@ -879,9 +882,10 @@ body::after {
   height: 16px;
 }
 
-.rec-icon-wrap.purple { background: rgba(175, 82, 222, 0.15); color: var(--apple-purple); }
-.rec-icon-wrap.amber { background: rgba(255, 149, 0, 0.15); color: var(--apple-orange); }
-.rec-icon-wrap.mint { background: rgba(0, 199, 190, 0.15); color: var(--apple-mint); }
+.rec-icon-wrap.purple { background: rgba(191, 90, 242, 0.18); color: var(--apple-purple); }
+.rec-icon-wrap.amber  { background: rgba(255, 159, 10, 0.18); color: var(--apple-orange); }
+.rec-icon-wrap.yellow { background: rgba(255, 214, 10, 0.18); color: var(--apple-yellow); }
+.rec-icon-wrap.mint   { background: rgba(99, 230, 226, 0.15); color: var(--apple-mint); }
 
 .rec-content {
   flex: 1;
@@ -942,7 +946,7 @@ body::after {
 
 .input-with-action input:focus {
   border-color: var(--apple-blue);
-  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.25);
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.3);
 }
 
 .preset-chips {
@@ -970,9 +974,9 @@ body::after {
 }
 
 .chip:hover {
-  background: rgba(0, 122, 255, 0.15);
+  background: rgba(10, 132, 255, 0.18);
   color: #ffffff;
-  border-color: rgba(0, 122, 255, 0.35);
+  border-color: rgba(10, 132, 255, 0.35);
 }
 
 .form-row {
@@ -1008,7 +1012,7 @@ body::after {
   padding: 14px 16px;
   border-radius: var(--radius-sm);
   background: var(--sys-bg-inset);
-  border: 1px solid rgba(0, 122, 255, 0.25);
+  border: 1px solid rgba(10, 132, 255, 0.25);
 }
 
 .progress-header {
@@ -1030,7 +1034,7 @@ body::after {
 .spinner-ring {
   width: 12px;
   height: 12px;
-  border: 2px solid rgba(50, 173, 230, 0.25);
+  border: 2px solid rgba(100, 210, 255, 0.25);
   border-top-color: var(--apple-cyan);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -1399,7 +1403,7 @@ body::after {
   width: 38px;
   height: 38px;
   border-radius: 10px;
-  background: rgba(255, 149, 0, 0.15);
+  background: rgba(255, 159, 10, 0.18);
   color: var(--apple-orange);
   display: flex;
   align-items: center;
@@ -1444,8 +1448,8 @@ body::after {
   gap: 8px;
   padding: 8px 12px;
   border-radius: var(--radius-sm);
-  background: rgba(0, 122, 255, 0.1);
-  border: 1px solid rgba(0, 122, 255, 0.25);
+  background: rgba(10, 132, 255, 0.15);
+  border: 1px solid rgba(10, 132, 255, 0.3);
   font-size: 0.78rem;
   color: var(--apple-cyan);
   margin-bottom: 18px;

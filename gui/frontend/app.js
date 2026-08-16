@@ -189,6 +189,10 @@ class StorageApp {
         this.loadSnapshots(),
         this.loadAuditLogs()
       ]);
+      if (this.stats) {
+        this.renderDashboardStats(this.stats);
+        this.renderStorageHeroBar(this.stats);
+      }
     } catch (e) {
       console.error('Error during data load:', e);
     }
@@ -227,11 +231,15 @@ class StorageApp {
         b.classList.toggle('active', parseInt(b.getAttribute('data-days')) === days);
       });
 
-      const data = await this.apiRequest(`/files/stale?days=${days}&min_score=0.10&limit=100`);
+      const data = await this.apiRequest(`/files/stale?days=${days}&min_score=0.01&limit=100`);
       this.staleFiles = data.files || [];
       const badge = document.getElementById('badge-stale');
       if (badge) badge.innerText = this.staleFiles.length;
       this.renderStaleTable();
+      if (this.stats) {
+        this.renderDashboardStats(this.stats);
+        this.renderStorageHeroBar(this.stats);
+      }
     } catch (err) {
       console.error('Failed to load stale files:', err);
     }
@@ -270,14 +278,14 @@ class StorageApp {
 
   renderDashboardStats(stats) {
     document.getElementById('stat-total-storage').innerText = this.formatBytes(stats.total_bytes);
-    document.getElementById('stat-total-files').innerText = `${stats.total_files.toLocaleString()} files indexed`;
+    document.getElementById('stat-total-files').innerText = `${(stats.total_files || 0).toLocaleString('en-US')} files indexed`;
 
     document.getElementById('stat-duplicate-bytes').innerText = this.formatBytes(stats.total_wasted_bytes);
-    document.getElementById('stat-duplicate-count').innerText = `${(stats.total_duplicates || 0).toLocaleString()} redundant copies`;
+    document.getElementById('stat-duplicate-count').innerText = `${(stats.total_duplicates || 0).toLocaleString('en-US')} redundant copies`;
 
-    const staleBytes = this.staleFiles.reduce((acc, f) => acc + (f.size || 0), 0);
+    const staleBytes = (this.staleFiles || []).reduce((acc, f) => acc + (f.size || 0), 0);
     document.getElementById('stat-stale-bytes').innerText = this.formatBytes(staleBytes);
-    document.getElementById('stat-stale-count').innerText = `${this.staleFiles.length} files (30+ days)`;
+    document.getElementById('stat-stale-count').innerText = `${(this.staleFiles || []).length.toLocaleString('en-US')} files (30+ days)`;
 
     const reclaimable = (stats.total_wasted_bytes || 0) + staleBytes;
     document.getElementById('stat-reclaimable-total').innerText = this.formatBytes(reclaimable);
@@ -290,7 +298,7 @@ class StorageApp {
 
     if (heroTitle) heroTitle.innerText = `${this.formatBytes(stats.total_bytes)} Indexed Storage`;
 
-    const staleBytes = this.staleFiles.reduce((acc, f) => acc + (f.size || 0), 0);
+    const staleBytes = (this.staleFiles || []).reduce((acc, f) => acc + (f.size || 0), 0);
     const reclaimable = (stats.total_wasted_bytes || 0) + staleBytes;
     if (heroReclaim) heroReclaim.innerText = `${this.formatBytes(reclaimable)} Safe Cleanup Potential`;
 
@@ -307,20 +315,21 @@ class StorageApp {
       else cacheBytes += c.total_bytes;
     });
 
+    const uniqueUserBytes = Math.max(0, userBytes - dupBytes);
     const total = stats.total_bytes || 1;
-    const userPct = Math.max(Math.round((userBytes / total) * 100), 5);
-    const sysPct = Math.max(Math.round((sysBytes / total) * 100), 5);
-    const cachePct = Math.max(Math.round((cacheBytes / total) * 100), 5);
-    const dupPct = Math.max(Math.round((dupBytes / total) * 100), 5);
+    const userPct = Math.max(Math.round((uniqueUserBytes / total) * 100), uniqueUserBytes > 0 ? 1 : 0);
+    const sysPct = Math.max(Math.round((sysBytes / total) * 100), sysBytes > 0 ? 1 : 0);
+    const cachePct = Math.max(Math.round((cacheBytes / total) * 100), cacheBytes > 0 ? 1 : 0);
+    const dupPct = Math.max(Math.round((dupBytes / total) * 100), dupBytes > 0 ? 1 : 0);
 
     bar.innerHTML = `
-      <div class="bar-segment user" style="width: ${userPct}%" title="User Files: ${this.formatBytes(userBytes)}"></div>
-      <div class="bar-segment sys" style="width: ${sysPct}%" title="System Protected: ${this.formatBytes(sysBytes)}"></div>
+      <div class="bar-segment user" style="width: ${userPct}%" title="User Files: ${this.formatBytes(uniqueUserBytes)}"></div>
       <div class="bar-segment cache" style="width: ${cachePct}%" title="Logs & Cache: ${this.formatBytes(cacheBytes)}"></div>
       <div class="bar-segment dup" style="width: ${dupPct}%" title="Duplicates: ${this.formatBytes(dupBytes)}"></div>
+      <div class="bar-segment sys" style="width: ${sysPct}%" title="System Protected: ${this.formatBytes(sysBytes)}"></div>
     `;
 
-    document.getElementById('bar-val-user').innerText = this.formatBytes(userBytes);
+    document.getElementById('bar-val-user').innerText = this.formatBytes(uniqueUserBytes);
     document.getElementById('bar-val-sys').innerText = this.formatBytes(sysBytes);
     document.getElementById('bar-val-cache').innerText = this.formatBytes(cacheBytes);
     document.getElementById('bar-val-dup').innerText = this.formatBytes(dupBytes);
@@ -338,12 +347,12 @@ class StorageApp {
     segmentsContainer.innerHTML = '';
 
     const colors = {
-      user: '#007aff',              // Apple Blue
-      system_protected: '#af52de',  // Apple Purple
-      system_log: '#ff9500',        // Apple Orange
-      temp: '#ff3b30',              // Apple Red
-      crash_dump: '#ff2d55',        // Apple Pink
-      system_cache: '#34c759'       // Apple Green
+      user: '#ff453a',              // systemRed (dark)
+      system_protected: '#98989d',  // systemGray (dark)
+      system_log: '#ff9f0a',        // systemOrange (dark)
+      temp: '#ff9f0a',              // systemOrange (dark)
+      crash_dump: '#ff453a',        // systemRed (dark)
+      system_cache: '#ff9f0a'       // systemOrange (dark)
     };
 
     const circumference = 2 * Math.PI * 38; // r=38 -> ~238.76
@@ -381,7 +390,7 @@ class StorageApp {
           <span class="legend-dot" style="background: ${color}"></span>
           <span>${this.formatCategoryName(cat.category)}</span>
         </div>
-        <span class="legend-value">${this.formatBytes(cat.total_bytes)} (${cat.total_files.toLocaleString()})</span>
+        <span class="legend-value">${this.formatBytes(cat.total_bytes)} (${(cat.total_files || 0).toLocaleString('en-US')})</span>
       `;
       legend.appendChild(item);
     });
@@ -405,13 +414,14 @@ class StorageApp {
     }
 
     container.innerHTML = this.duplicates.map((group) => {
-      const wasted = group.wasted_bytes;
+      const wasted = group.wasted_bytes || 0;
+      const hashStr = group.content_hash || group.hash || '';
       return `
         <div class="duplicate-cluster-card">
           <div class="cluster-header">
             <div class="cluster-hash">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-              <span>SHA-256: ${group.hash.substring(0, 16)}...</span>
+              <span>SHA-256: ${hashStr ? hashStr.substring(0, 16) + '...' : 'Unknown'}</span>
             </div>
             <div class="cluster-meta">
               <span>${group.files.length} Copies</span> • <span class="text-amber">${this.formatBytes(wasted)} Reclaimable</span>
@@ -529,7 +539,7 @@ class StorageApp {
         <td><span class="badge badge-secondary">#${s.id}</span></td>
         <td>${this.formatTimestamp(s.scanned_at)}</td>
         <td class="path-cell" title="${s.root_path}">${s.root_path}</td>
-        <td>${(s.total_files || 0).toLocaleString()} files</td>
+        <td>${(s.total_files || 0).toLocaleString('en-US')} files</td>
         <td class="size-cell">${this.formatBytes(s.total_bytes)}</td>
       </tr>
     `).join('');
@@ -585,8 +595,14 @@ class StorageApp {
       return;
     }
 
-    const sorted = [...this.snapshots].sort((a, b) => a.scanned_at - b.scanned_at);
-    const times = sorted.map(s => s.scanned_at);
+    const parseTimeSec = (val) => {
+      if (typeof val === 'number') return val > 1e11 ? val / 1000 : val;
+      const d = new Date(val);
+      return isNaN(d.getTime()) ? 0 : d.getTime() / 1000;
+    };
+
+    const sorted = [...this.snapshots].sort((a, b) => parseTimeSec(a.scanned_at) - parseTimeSec(b.scanned_at));
+    const times = sorted.map(s => parseTimeSec(s.scanned_at));
     const bytes = sorted.map(s => s.total_bytes);
 
     const n = sorted.length;
@@ -603,7 +619,8 @@ class StorageApp {
       sumXX += x * x;
     }
 
-    const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX || 1);
+    const denominator = n * sumXX - sumX * sumX;
+    const slope = denominator !== 0 ? (n * sumXY - sumX * sumY) / denominator : 0;
     const intercept = (sumY - slope * sumX) / n;
 
     const dailyGrowth = Math.max(slope, 1024 * 1024);
@@ -611,7 +628,7 @@ class StorageApp {
 
     const currentBytes = bytes[bytes.length - 1];
     const assumedCapacity = Math.max(currentBytes * 1.4, 120 * 1024 * 1024 * 1024);
-    const remainingBytes = assumedCapacity - currentBytes;
+    const remainingBytes = Math.max(0, assumedCapacity - currentBytes);
     const daysUntilFull = Math.max(Math.round(remainingBytes / dailyGrowth), 14);
 
     document.getElementById('forecast-days-until-full').innerText = `${daysUntilFull} Days`;
@@ -630,7 +647,7 @@ class StorageApp {
     ctx.fillText('Perform scans across multiple directories to build time-series snapshots for AI growth modeling.', width / 2, height / 2);
   }
 
-  drawForecastChart(ctx, width, height, snapshots, slope, intercept, minT) {
+  drawForecastChart(ctx, width, height, snapshots, slope, intercept, minT, assumedCapacity) {
     const padX = 64;
     const padY = 36;
     const plotW = width - padX * 2;
@@ -667,8 +684,8 @@ class StorageApp {
 
     // Area Fill Gradient below Historical Curve
     const grad = ctx.createLinearGradient(0, padY, 0, height - padY);
-    grad.addColorStop(0, 'rgba(50, 173, 230, 0.25)');
-    grad.addColorStop(1, 'rgba(50, 173, 230, 0.0)');
+    grad.addColorStop(0, 'rgba(100, 210, 255, 0.20)');
+    grad.addColorStop(1, 'rgba(100, 210, 255, 0.0)');
 
     ctx.beginPath();
     points.forEach((p, idx) => {
@@ -681,9 +698,9 @@ class StorageApp {
     ctx.fillStyle = grad;
     ctx.fill();
 
-    // Draw Historical Line (Cyan/Blue)
+    // Draw Historical Line (systemCyan dark)
     ctx.beginPath();
-    ctx.strokeStyle = '#32ade6';
+    ctx.strokeStyle = '#64d2ff';
     ctx.lineWidth = 2.5;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
@@ -695,12 +712,12 @@ class StorageApp {
 
     // Draw Historical Dot Pills
     points.forEach(p => {
-      ctx.fillStyle = '#12141a';
+      ctx.fillStyle = '#000000';
       ctx.beginPath();
       ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
       ctx.fill();
 
-      ctx.fillStyle = '#32ade6';
+      ctx.fillStyle = '#64d2ff';
       ctx.beginPath();
       ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2);
       ctx.fill();
@@ -715,7 +732,7 @@ class StorageApp {
 
     ctx.save();
     ctx.setLineDash([5, 5]);
-    ctx.strokeStyle = '#af52de';
+    ctx.strokeStyle = '#bf5af2';
     ctx.lineWidth = 2.5;
     ctx.beginPath();
     ctx.moveTo(lastPoint.x, lastPoint.y);
@@ -724,17 +741,17 @@ class StorageApp {
     ctx.restore();
 
     // Projected Dot Pill
-    ctx.fillStyle = '#12141a';
+    ctx.fillStyle = '#000000';
     ctx.beginPath();
     ctx.arc(projectX, projectY, 6, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = '#af52de';
+    ctx.fillStyle = '#bf5af2';
     ctx.beginPath();
     ctx.arc(projectX, projectY, 4, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = '#af52de';
+    ctx.fillStyle = '#bf5af2';
     ctx.font = '600 11px Outfit, sans-serif';
     ctx.textAlign = 'right';
     ctx.fillText(`+30d Horizon (${this.formatBytes(projectBytes)})`, projectX - 12, projectY - 8);
@@ -745,7 +762,7 @@ class StorageApp {
     if (!container) return;
 
     const dupWaste = this.stats ? this.stats.total_wasted_bytes || 0 : 0;
-    const staleWaste = this.staleFiles.reduce((a, f) => a + (f.size || 0), 0);
+    const staleWaste = (this.staleFiles || []).reduce((a, f) => a + (f.size || 0), 0);
 
     const recs = [
       {
@@ -829,9 +846,9 @@ class StorageApp {
         const statusText = document.getElementById('scan-status-text');
         const statsText = document.getElementById('scan-stats-text');
 
-        if (status.is_scanning) {
+        if (status.status === 'scanning') {
           if (statusText) statusText.innerText = `Indexing: ${status.target_path}...`;
-          if (statsText) statsText.innerText = `${status.files_scanned.toLocaleString()} files indexed`;
+          if (statsText) statsText.innerText = `${(status.files_scanned || 0).toLocaleString('en-US')} files indexed (${this.formatBytes(status.total_bytes || 0)})`;
         } else {
           clearInterval(this.scanPollTimer);
           const btn = document.getElementById('btn-start-scan');
@@ -840,7 +857,11 @@ class StorageApp {
           const progressBox = document.getElementById('scan-progress-box');
           if (progressBox) progressBox.style.display = 'none';
 
-          this.showToast('Filesystem scan & indexing completed!', 'success');
+          if (status.status === 'completed') {
+            this.showToast(`Filesystem scan completed! Indexed ${(status.files_scanned || 0).toLocaleString('en-US')} files.`, 'success');
+          } else if (status.status === 'failed') {
+            this.showToast(`Scan failed: ${status.error || 'Unknown error'}`, 'error');
+          }
           this.loadAllData();
         }
       } catch (e) {
@@ -995,10 +1016,16 @@ class StorageApp {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
 
-  formatTimestamp(sec) {
-    if (!sec) return '--';
-    const date = new Date(sec * 1000);
-    return date.toLocaleDateString(undefined, {
+  formatTimestamp(val) {
+    if (!val) return '--';
+    let date;
+    if (typeof val === 'number') {
+      date = val > 1e11 ? new Date(val) : new Date(val * 1000);
+    } else {
+      date = new Date(val);
+    }
+    if (isNaN(date.getTime())) return '--';
+    return date.toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
       hour: '2-digit',
