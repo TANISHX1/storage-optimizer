@@ -3,13 +3,12 @@ from pathlib import Path
 from recommend.pipeline import (
     run_recommendation_pipeline,
 )
-
+from core.mock_provider import MockDataProvider
 
 GB = 1024 ** 3
 
 
 def format_bytes(value: float) -> str:
-
     units = [
         "B",
         "KB",
@@ -21,25 +20,19 @@ def format_bytes(value: float) -> str:
     size = float(value)
 
     for unit in units:
-
         if size < 1024:
             return f"{size:.2f} {unit}"
-
         size /= 1024
 
     return f"{size:.2f} PB"
 
 
 def main():
-
     result = run_recommendation_pipeline(
-
-        data_path=Path(
-            "data/mock_data.json"
+        provider=MockDataProvider(
+            Path("data/mock_data.json")
         ),
-
         total_capacity_bytes=256 * GB,
-
         forecast_days=365,
     )
 
@@ -111,7 +104,6 @@ def main():
         result["recommendations"],
         start=1,
     ):
-
         print(
             f"\n[{index}] "
             f"{recommendation.severity.upper()}"
@@ -130,7 +122,6 @@ def main():
         )
 
         if recommendation.potential_savings_bytes:
-
             print(
                 "Potential savings:",
                 format_bytes(
