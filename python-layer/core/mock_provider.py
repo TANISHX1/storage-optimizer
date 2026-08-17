@@ -30,21 +30,34 @@ class MockDataProvider(DataProvider):
         with self.data_path.open("r", encoding="utf-8") as file:
             self.data = json.load(file)
 
-    def get_snapshots(self) -> List[Snapshot]:
+    def get_snapshots(
+    self,
+    root: str | None = None,
+) -> List[Snapshot]:
+
         snapshots = []
 
         for item in self.data.get("snapshots", []):
-            snapshots.append(
-                Snapshot(
-                    id=item["id"],
-                    scanned_at=datetime.fromisoformat(
-                        item["scanned_at"]
-                    ),
-                    root_path=item["root_path"],
-                    total_files=item["total_files"],
-                    total_bytes=item["total_bytes"],
-                )
+
+            snapshot = Snapshot(
+            id=item["id"],
+            scanned_at=datetime.fromisoformat(
+                item["scanned_at"]
+            ),
+            root_path=item["root_path"],
+            total_files=item["total_files"],
+            total_bytes=item["total_bytes"],
             )
+
+            if root is not None:
+                if snapshot.root_path != root:
+                    continue
+
+            snapshots.append(snapshot)
+
+        snapshots.sort(
+            key=lambda snapshot: snapshot.scanned_at
+        )
 
         return snapshots
 

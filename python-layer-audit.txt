@@ -1,0 +1,3483 @@
+===== PYTHON LAYER STRUCTURE =====
+python-layer/core/api_provider.py
+python-layer/core/go_client.py
+python-layer/core/__init__.py
+python-layer/core/mock_provider.py
+python-layer/core/models.py
+python-layer/core/provider.py
+python-layer/data/mock_data.json
+python-layer/forecast/capacity_pipeline.py
+python-layer/forecast/capacity.py
+python-layer/forecast/evaluation.py
+python-layer/forecast/forecast.py
+python-layer/forecast/growth.py
+python-layer/forecast/__init__.py
+python-layer/forecast/metrics.py
+python-layer/forecast/model.py
+python-layer/forecast/pipeline.py
+python-layer/.gitkeep
+python-layer/README.md
+python-layer/recommend/engine.py
+python-layer/recommend/__init__.py
+python-layer/recommend/pipeline.py
+python-layer/recommend/rules.py
+python-layer/requirements-lock.txt
+python-layer/requirements.txt
+python-layer/service.py
+python-layer/test_capacity.py
+python-layer/test_forecast.py
+python-layer/test_full_forecast.py
+python-layer/test_growth.py
+python-layer/test_model_evaluation.py
+python-layer/test_provider.py
+python-layer/test_recommendation_pipeline.py
+python-layer/test_recommendations.py
+python-layer/tests/test_forecast.py
+python-layer/tests/test_recommendations.py
+
+===== PYTHON SOURCE =====
+
+============================================================
+FILE: python-layer/core/__init__.py
+============================================================
+
+============================================================
+FILE: python-layer/core/mock_provider.py
+============================================================
+import json
+from datetime import datetime
+from pathlib import Path
+from typing import List, Dict
+
+from .provider import DataProvider
+from .models import (
+    Snapshot,
+    StaleFile,
+    DuplicateCluster,
+    Action,
+)
+
+
+class MockDataProvider(DataProvider):
+    """
+    Loads storage optimizer data from the local mock JSON dataset.
+
+    This provider is used during Windows development.
+    """
+
+    def __init__(self, data_path: str | Path):
+        self.data_path = Path(data_path)
+
+        if not self.data_path.exists():
+            raise FileNotFoundError(
+                f"Mock dataset not found: {self.data_path}"
+            )
+
+        with self.data_path.open("r", encoding="utf-8") as file:
+            self.data = json.load(file)
+
+    def get_snapshots(self) -> List[Snapshot]:
+        snapshots = []
+
+        for item in self.data.get("snapshots", []):
+            snapshots.append(
+                Snapshot(
+                    id=item["id"],
+                    scanned_at=datetime.fromisoformat(
+                        item["scanned_at"]
+                    ),
+                    root_path=item["root_path"],
+                    total_files=item["total_files"],
+                    total_bytes=item["total_bytes"],
+                )
+            )
+
+        return snapshots
+
+    def get_category_stats(self) -> Dict[str, Dict[str, int]]:
+        stats = self.data.get("stats", {})
+
+        return stats.get("categories", {})
+
+    def get_stale_files(self, days: int = 30) -> List[StaleFile]:
+        stale_data = self.data.get("stale_files", {})
+
+        files = []
+
+        for item in stale_data.get("files", []):
+            files.append(
+                StaleFile(
+                    path=item["path"],
+                    size_bytes=item["size_bytes"],
+                    last_accessed=datetime.fromisoformat(
+                        item["last_accessed"]
+                    ),
+                    staleness_score=item["staleness_score"],
+                )
+            )
+
+        return files
+
+    def get_duplicates(self) -> List[DuplicateCluster]:
+        duplicate_data = self.data.get("duplicates", {})
+
+        clusters = []
+
+        for item in duplicate_data.get("clusters", []):
+            clusters.append(
+                DuplicateCluster(
+                    hash=item["hash"],
+                    file_count=item["file_count"],
+                    total_bytes=item["total_bytes"],
+                    wasted_bytes=item["wasted_bytes"],
+                    files=item["files"],
+                )
+            )
+
+        return clusters
+
+    def get_action_history(self) -> List[Action]:
+        actions = []
+
+        for item in self.data.get("actions_history", []):
+            actions.append(
+                Action(
+                    id=item["id"],
+                    action=item["action"],
+                    path=item["path"],
+                    size_bytes=item["size_bytes"],
+                    created_at=datetime.fromisoformat(
+                        item["created_at"]
+                    ),
+                )
+            )
+
+        return actions
+============================================================
+FILE: python-layer/core/models.py
+============================================================
+from dataclasses import dataclass
+from datetime import datetime
+from typing import List, Dict, Any
+
+
+@dataclass
+class Snapshot:
+    id: int
+    scanned_at: datetime
+    root_path: str
+    total_files: int
+    total_bytes: int
+
+
+@dataclass
+class CategoryStats:
+    files: int
+    bytes: int
+
+
+@dataclass
+class StaleFile:
+    path: str
+    size_bytes: int
+    last_accessed: datetime
+    staleness_score: float
+
+
+@dataclass
+class DuplicateCluster:
+    hash: str
+    file_count: int
+    total_bytes: int
+    wasted_bytes: int
+    files: List[str]
+
+
+@dataclass
+class Action:
+    id: int
+    action: str
+    path: str
+    size_bytes: int
+    created_at: datetime
+============================================================
+FILE: python-layer/core/provider.py
+============================================================
+from abc import ABC, abstractmethod
+from typing import List, Dict
+
+from .models import (
+    Snapshot,
+    StaleFile,
+    DuplicateCluster,
+    Action,
+)
+
+
+class DataProvider(ABC):
+    """
+    Abstract interface for storage optimizer data.
+
+    The forecasting and recommendation layers will depend
+    on this interface rather than directly on the Go API
+    or mock data.
+    """
+
+    @abstractmethod
+    def get_snapshots(self) -> List[Snapshot]:
+        pass
+
+    @abstractmethod
+    def get_category_stats(self) -> Dict[str, Dict[str, int]]:
+        pass
+
+    @abstractmethod
+    def get_stale_files(self, days: int = 30) -> List[StaleFile]:
+        pass
+
+    @abstractmethod
+    def get_duplicates(self) -> List[DuplicateCluster]:
+        pass
+
+    @abstractmethod
+    def get_action_history(self) -> List[Action]:
+        pass
+============================================================
+FILE: python-layer/core/go_client.py
+============================================================
+from typing import Any
+import requests
+
+
+class GoCoreClient:
+    """Client for the Go storage optimizer core API."""
+
+    def __init__(
+        self,
+        base_url: str = "http://127.0.0.1:8080",
+        timeout: float = 10.0,
+    ):
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+
+    def _get(self, path: str) -> Any:
+        response = requests.get(
+            f"{self.base_url}{path}",
+            timeout=self.timeout,
+        )
+
+        response.raise_for_status()
+
+        return response.json()
+
+    def _post(
+        self,
+        path: str,
+        payload: dict | None = None,
+    ) -> Any:
+
+        response = requests.post(
+            f"{self.base_url}{path}",
+            json=payload,
+            timeout=self.timeout,
+        )
+
+        response.raise_for_status()
+
+        return response.json()
+
+    def health(self) -> dict:
+        return self._get("/api/v1/health")
+
+    def duplicates(self) -> dict:
+        return self._get("/api/v1/duplicates")
+
+    def stale(self, days: int = 30) -> dict:
+        return self._get(
+            f"/api/v1/stale?days={days}"
+        )
+
+    def snapshots(self, limit: int = 100) -> dict:
+        return self._get(
+            f"/api/v1/snapshots?limit={limit}"
+        )
+============================================================
+FILE: python-layer/core/api_provider.py
+============================================================
+from datetime import datetime
+from typing import Any
+
+import requests
+
+from .models import (
+    StorageSnapshot,
+)
+
+
+class GoCoreAPIError(Exception):
+    """Raised when the Go Core API cannot be reached or returns an error."""
+
+
+class GoCoreProvider:
+    """
+    Python-side client for the Go Core REST API.
+
+    The Python layer never accesses SQLite directly.
+    All filesystem/storage information comes from Go Core.
+    """
+
+    def __init__(
+        self,
+        base_url: str = "http://127.0.0.1:8080/api/v1",
+        timeout: float = 10.0,
+    ):
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+
+    def _get(
+        self,
+        endpoint: str,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+
+        url = f"{self.base_url}/{endpoint.lstrip('/')}"
+
+        try:
+            response = requests.get(
+                url,
+                params=params,
+                timeout=self.timeout,
+            )
+        except requests.RequestException as exc:
+            raise GoCoreAPIError(
+                f"Unable to connect to Go Core at {url}: {exc}"
+            ) from exc
+
+        if not response.ok:
+            raise GoCoreAPIError(
+                f"Go Core returned HTTP {response.status_code}: "
+                f"{response.text}"
+            )
+
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise GoCoreAPIError(
+                f"Go Core returned invalid JSON from {url}"
+            ) from exc
+
+    def health(self) -> dict[str, Any]:
+        return self._get("health")
+
+    def get_stats(self) -> dict[str, Any]:
+        return self._get("stats")
+
+    def get_snapshots(
+        self,
+        limit: int = 50,
+        root: str | None = None,
+    ) -> list[dict[str, Any]]:
+
+        params = {
+            "limit": limit,
+        }
+
+        if root:
+            params["root"] = root
+
+        result = self._get(
+            "snapshots",
+            params=params,
+        )
+
+        return result.get("snapshots", [])
+
+    def get_duplicates(
+        self,
+        full: bool = False,
+        workers: int | None = None,
+    ) -> dict[str, Any]:
+
+        params = {
+            "full": str(full).lower(),
+        }
+
+        if workers:
+            params["workers"] = workers
+
+        return self._get(
+            "files/duplicates",
+            params=params,
+        )
+
+    def get_stale(
+        self,
+        days: int = 30,
+        min_score: float = 0.05,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+
+        return self._get(
+            "files/stale",
+            params={
+                "days": days,
+                "min_score": min_score,
+                "limit": limit,
+            },
+        )
+============================================================
+FILE: python-layer/forecast/__init__.py
+============================================================
+
+============================================================
+FILE: python-layer/forecast/capacity.py
+============================================================
+from dataclasses import dataclass
+from datetime import datetime
+from typing import List
+
+from .model import ForecastPoint
+
+
+@dataclass
+class CapacityPrediction:
+    total_capacity_bytes: int
+
+    current_bytes: int
+    current_utilization_percent: float
+
+    threshold_90_bytes: int
+    threshold_100_bytes: int
+
+    date_at_90_percent: datetime | None
+    date_at_100_percent: datetime | None
+
+    days_until_90_percent: float | None
+    days_until_100_percent: float | None
+
+
+def find_threshold_date(
+    forecast_points: List[ForecastPoint],
+    threshold_bytes: int,
+) -> datetime | None:
+    """
+    Find the first forecast date where predicted storage
+    reaches or exceeds the requested threshold.
+    """
+
+    for point in forecast_points:
+
+        if point.predicted_bytes >= threshold_bytes:
+            return point.date
+
+    return None
+
+
+def calculate_days_until(
+    current_date: datetime,
+    target_date: datetime | None,
+) -> float | None:
+
+    if target_date is None:
+        return None
+
+    difference = (
+        target_date - current_date
+    ).total_seconds()
+
+    return difference / 86400
+
+
+def calculate_capacity_prediction(
+    current_bytes: int,
+    current_date: datetime,
+    total_capacity_bytes: int,
+    forecast_points: List[ForecastPoint],
+) -> CapacityPrediction:
+
+    if total_capacity_bytes <= 0:
+        raise ValueError(
+            "Total capacity must be greater than zero."
+        )
+
+    if current_bytes < 0:
+        raise ValueError(
+            "Current storage cannot be negative."
+        )
+
+    threshold_90 = int(
+        total_capacity_bytes * 0.90
+    )
+
+    threshold_100 = total_capacity_bytes
+
+    date_90 = find_threshold_date(
+        forecast_points,
+        threshold_90,
+    )
+
+    date_100 = find_threshold_date(
+        forecast_points,
+        threshold_100,
+    )
+
+    utilization = (
+        current_bytes
+        / total_capacity_bytes
+    ) * 100
+
+    return CapacityPrediction(
+        total_capacity_bytes=total_capacity_bytes,
+
+        current_bytes=current_bytes,
+
+        current_utilization_percent=utilization,
+
+        threshold_90_bytes=threshold_90,
+
+        threshold_100_bytes=threshold_100,
+
+        date_at_90_percent=date_90,
+
+        date_at_100_percent=date_100,
+
+        days_until_90_percent=calculate_days_until(
+            current_date,
+            date_90,
+        ),
+
+        days_until_100_percent=calculate_days_until(
+            current_date,
+            date_100,
+        ),
+    )
+============================================================
+FILE: python-layer/forecast/capacity_pipeline.py
+============================================================
+from pathlib import Path
+
+from core.mock_provider import MockDataProvider
+
+from .forecast import forecast_storage
+from .capacity import calculate_capacity_prediction
+
+
+def run_capacity_prediction(
+    total_capacity_bytes: int,
+    forecast_days: int = 365,
+):
+    """
+    Generate storage forecasts and determine when the
+    disk reaches 90% and 100% capacity.
+    """
+
+    provider = MockDataProvider(
+        Path("data/mock_data.json")
+    )
+
+    snapshots = provider.get_snapshots()
+
+    forecast_result = forecast_storage(
+        snapshots,
+        forecast_days=forecast_days,
+        validation_size=3,
+    )
+
+    current_snapshot = snapshots[-1]
+
+    capacity_prediction = (
+        calculate_capacity_prediction(
+            current_bytes=current_snapshot.total_bytes,
+            current_date=current_snapshot.scanned_at,
+            total_capacity_bytes=total_capacity_bytes,
+            forecast_points=forecast_result.forecast_points,
+        )
+    )
+
+    return forecast_result, capacity_prediction
+============================================================
+FILE: python-layer/forecast/evaluation.py
+============================================================
+from dataclasses import dataclass
+from typing import List
+
+import numpy as np
+
+from core.models import Snapshot
+
+from .metrics import (
+    calculate_mae,
+    calculate_rmse,
+)
+from .model import (
+    LinearForecastModel,
+    PolynomialForecastModel,
+    HoltWintersForecastModel,
+)
+
+
+@dataclass
+class ModelEvaluation:
+    model_name: str
+    mae_bytes: float
+    rmse_bytes: float
+
+
+def evaluate_linear(
+    train: List[Snapshot],
+    test: List[Snapshot],
+) -> ModelEvaluation:
+
+    model = LinearForecastModel()
+
+    model.fit(train)
+
+    test_dates = [
+        snapshot.scanned_at
+        for snapshot in test
+    ]
+
+    actual = np.array([
+        snapshot.total_bytes
+        for snapshot in test
+    ])
+
+    predicted = model.predict(
+        test_dates
+    )
+
+    return ModelEvaluation(
+        model_name="Linear Regression",
+        mae_bytes=calculate_mae(
+            actual,
+            predicted,
+        ),
+        rmse_bytes=calculate_rmse(
+            actual,
+            predicted,
+        ),
+    )
+
+
+def evaluate_polynomial(
+    train: List[Snapshot],
+    test: List[Snapshot],
+    degree: int = 2,
+) -> ModelEvaluation:
+
+    model = PolynomialForecastModel(
+        degree=degree
+    )
+
+    model.fit(train)
+
+    test_dates = [
+        snapshot.scanned_at
+        for snapshot in test
+    ]
+
+    actual = np.array([
+        snapshot.total_bytes
+        for snapshot in test
+    ])
+
+    predicted = model.predict(
+        test_dates
+    )
+
+    return ModelEvaluation(
+        model_name=f"Polynomial Regression (degree={degree})",
+        mae_bytes=calculate_mae(
+            actual,
+            predicted,
+        ),
+        rmse_bytes=calculate_rmse(
+            actual,
+            predicted,
+        ),
+    )
+
+
+def evaluate_holt_winters(
+    train: List[Snapshot],
+    test: List[Snapshot],
+) -> ModelEvaluation:
+
+    model = HoltWintersForecastModel()
+
+    model.fit(train)
+
+    actual = np.array([
+        snapshot.total_bytes
+        for snapshot in test
+    ])
+
+    predicted = model.predict(
+        len(test)
+    )
+
+    return ModelEvaluation(
+        model_name="Holt-Winters",
+        mae_bytes=calculate_mae(
+            actual,
+            predicted,
+        ),
+        rmse_bytes=calculate_rmse(
+            actual,
+            predicted,
+        ),
+    )
+
+
+def evaluate_models(
+    snapshots: List[Snapshot],
+    test_size: int = 3,
+) -> List[ModelEvaluation]:
+
+    if len(snapshots) <= test_size:
+        raise ValueError(
+            "Not enough snapshots for validation."
+        )
+
+    snapshots = sorted(
+        snapshots,
+        key=lambda snapshot: snapshot.scanned_at,
+    )
+
+    train = snapshots[:-test_size]
+    test = snapshots[-test_size:]
+
+    results = []
+
+    results.append(
+        evaluate_linear(
+            train,
+            test,
+        )
+    )
+
+    results.append(
+        evaluate_polynomial(
+            train,
+            test,
+        )
+    )
+
+    results.append(
+        evaluate_holt_winters(
+            train,
+            test,
+        )
+    )
+
+    return results
+============================================================
+FILE: python-layer/forecast/forecast.py
+============================================================
+from dataclasses import dataclass
+from datetime import datetime
+from typing import List
+
+from core.models import Snapshot
+
+from .evaluation import evaluate_models
+from .pipeline import (
+    create_future_dates,
+    forecast_linear,
+    forecast_polynomial,
+    forecast_holt_winters,
+)
+from .model import ForecastPoint
+
+
+@dataclass
+class ForecastResult:
+    model_name: str
+    forecast_points: List[ForecastPoint]
+    mae_bytes: float
+    rmse_bytes: float
+
+
+def forecast_storage(
+    snapshots: List[Snapshot],
+    forecast_days: int = 30,
+    validation_size: int = 3,
+) -> ForecastResult:
+    """
+    Select the best forecasting model using chronological
+    validation and generate future storage predictions.
+    """
+
+    if len(snapshots) < validation_size + 3:
+        raise ValueError(
+            "Not enough snapshots for forecasting."
+        )
+
+    snapshots = sorted(
+        snapshots,
+        key=lambda snapshot: snapshot.scanned_at,
+    )
+
+    # ----------------------------------------
+    # 1. Evaluate candidate models
+    # ----------------------------------------
+
+    evaluations = evaluate_models(
+        snapshots,
+        test_size=validation_size,
+    )
+
+    # ----------------------------------------
+    # 2. Select model with lowest MAE
+    # ----------------------------------------
+
+    best = min(
+        evaluations,
+        key=lambda result: result.mae_bytes,
+    )
+
+    # ----------------------------------------
+    # 3. Generate future dates
+    # ----------------------------------------
+
+    latest_date = snapshots[-1].scanned_at
+
+    future_dates = create_future_dates(
+        latest_date,
+        forecast_days,
+    )
+
+    # ----------------------------------------
+    # 4. Train selected model on ALL data
+    # ----------------------------------------
+
+    if best.model_name == "Linear Regression":
+
+        forecast_points = forecast_linear(
+            snapshots,
+            future_dates,
+        )
+
+    elif best.model_name == "Polynomial Regression (degree=2)":
+
+        forecast_points = forecast_polynomial(
+            snapshots,
+            future_dates,
+            degree=2,
+        )
+
+    elif best.model_name == "Holt-Winters":
+
+        forecast_points = forecast_holt_winters(
+            snapshots,
+            future_dates,
+        )
+
+    else:
+        raise RuntimeError(
+            f"Unknown model: {best.model_name}"
+        )
+
+    return ForecastResult(
+        model_name=best.model_name,
+        forecast_points=forecast_points,
+        mae_bytes=best.mae_bytes,
+        rmse_bytes=best.rmse_bytes,
+    )
+============================================================
+FILE: python-layer/forecast/growth.py
+============================================================
+from dataclasses import dataclass
+from datetime import datetime
+from typing import List
+
+from core.models import Snapshot
+
+
+@dataclass
+class GrowthMetrics:
+    current_bytes: int
+    current_files: int
+
+    total_growth_bytes: int
+    total_growth_percent: float
+
+    daily_growth_rate_bytes: float
+    weekly_growth_rate_bytes: float
+
+    average_daily_growth_bytes: float
+    growth_volatility_bytes: float
+
+    snapshot_count: int
+
+
+@dataclass
+class GrowthPoint:
+    timestamp: datetime
+    bytes: int
+    growth_bytes: int
+    growth_rate_bytes_per_day: float
+
+
+def calculate_growth_points(
+    snapshots: List[Snapshot],
+) -> List[GrowthPoint]:
+    """
+    Calculate growth between consecutive storage snapshots.
+    """
+
+    if len(snapshots) < 2:
+        return []
+
+    snapshots = sorted(
+        snapshots,
+        key=lambda snapshot: snapshot.scanned_at,
+    )
+
+    points = []
+
+    for previous, current in zip(
+        snapshots,
+        snapshots[1:],
+    ):
+        time_difference = (
+            current.scanned_at - previous.scanned_at
+        )
+
+        days = time_difference.total_seconds() / 86400
+
+        if days <= 0:
+            continue
+
+        growth_bytes = (
+            current.total_bytes
+            - previous.total_bytes
+        )
+
+        daily_growth = growth_bytes / days
+
+        points.append(
+            GrowthPoint(
+                timestamp=current.scanned_at,
+                bytes=current.total_bytes,
+                growth_bytes=growth_bytes,
+                growth_rate_bytes_per_day=daily_growth,
+            )
+        )
+
+    return points
+
+
+def calculate_growth_metrics(
+    snapshots: List[Snapshot],
+) -> GrowthMetrics:
+    """
+    Calculate overall storage growth metrics.
+    """
+
+    if not snapshots:
+        raise ValueError(
+            "At least one snapshot is required"
+        )
+
+    snapshots = sorted(
+        snapshots,
+        key=lambda snapshot: snapshot.scanned_at,
+    )
+
+    latest = snapshots[-1]
+    earliest = snapshots[0]
+
+    total_growth_bytes = (
+        latest.total_bytes
+        - earliest.total_bytes
+    )
+
+    if earliest.total_bytes > 0:
+        total_growth_percent = (
+            total_growth_bytes
+            / earliest.total_bytes
+        ) * 100
+    else:
+        total_growth_percent = 0.0
+
+    growth_points = calculate_growth_points(
+        snapshots
+    )
+
+    if growth_points:
+        daily_rates = [
+            point.growth_rate_bytes_per_day
+            for point in growth_points
+        ]
+
+        average_daily_growth = (
+            sum(daily_rates)
+            / len(daily_rates)
+        )
+
+        variance = sum(
+            (
+                rate - average_daily_growth
+            ) ** 2
+            for rate in daily_rates
+        ) / len(daily_rates)
+
+        growth_volatility = variance ** 0.5
+
+    else:
+        average_daily_growth = 0.0
+        growth_volatility = 0.0
+
+    return GrowthMetrics(
+        current_bytes=latest.total_bytes,
+        current_files=latest.total_files,
+        total_growth_bytes=total_growth_bytes,
+        total_growth_percent=total_growth_percent,
+        daily_growth_rate_bytes=average_daily_growth,
+        weekly_growth_rate_bytes=(
+            average_daily_growth * 7
+        ),
+        average_daily_growth_bytes=average_daily_growth,
+        growth_volatility_bytes=growth_volatility,
+        snapshot_count=len(snapshots),
+    )
+============================================================
+FILE: python-layer/forecast/metrics.py
+============================================================
+import numpy as np
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+
+
+def calculate_mae(
+    actual: np.ndarray,
+    predicted: np.ndarray,
+) -> float:
+    """
+    Mean Absolute Error.
+    """
+
+    return float(
+        mean_absolute_error(
+            actual,
+            predicted,
+        )
+    )
+
+
+def calculate_rmse(
+    actual: np.ndarray,
+    predicted: np.ndarray,
+) -> float:
+    """
+    Root Mean Squared Error.
+    """
+
+    return float(
+        np.sqrt(
+            mean_squared_error(
+                actual,
+                predicted,
+            )
+        )
+    )
+============================================================
+FILE: python-layer/forecast/model.py
+============================================================
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import List
+
+import numpy as np
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import PolynomialFeatures
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
+
+from core.models import Snapshot
+
+
+@dataclass
+class ForecastPoint:
+    date: datetime
+    predicted_bytes: float
+    lower_bound: float | None = None
+    upper_bound: float | None = None
+
+
+class LinearForecastModel:
+    """
+    Linear regression model for storage growth.
+    """
+
+    def __init__(self):
+        self.model = LinearRegression()
+        self.start_time: datetime | None = None
+
+    def fit(self, snapshots: List[Snapshot]):
+        if len(snapshots) < 2:
+            raise ValueError(
+                "At least 2 snapshots are required."
+            )
+
+        snapshots = sorted(
+            snapshots,
+            key=lambda snapshot: snapshot.scanned_at,
+        )
+
+        self.start_time = snapshots[0].scanned_at
+
+        x = np.array([
+            [
+                (
+                    snapshot.scanned_at
+                    - self.start_time
+                ).total_seconds() / 86400
+            ]
+            for snapshot in snapshots
+        ])
+
+        y = np.array([
+            snapshot.total_bytes
+            for snapshot in snapshots
+        ])
+
+        self.model.fit(x, y)
+
+        return self
+
+    def predict(
+        self,
+        future_dates: List[datetime],
+    ) -> np.ndarray:
+
+        if self.start_time is None:
+            raise RuntimeError(
+                "Model must be fitted before prediction."
+            )
+
+        x = np.array([
+            [
+                (
+                    date - self.start_time
+                ).total_seconds() / 86400
+            ]
+            for date in future_dates
+        ])
+
+        predictions = self.model.predict(x)
+
+        return np.maximum(predictions, 0)
+
+
+class PolynomialForecastModel:
+    """
+    Polynomial regression model for non-linear storage growth.
+    """
+
+    def __init__(self, degree: int = 2):
+        self.degree = degree
+        self.model = LinearRegression()
+        self.transformer = PolynomialFeatures(
+            degree=degree
+        )
+        self.start_time: datetime | None = None
+
+    def fit(self, snapshots: List[Snapshot]):
+        if len(snapshots) < 3:
+            raise ValueError(
+                "At least 3 snapshots are required."
+            )
+
+        snapshots = sorted(
+            snapshots,
+            key=lambda snapshot: snapshot.scanned_at,
+        )
+
+        self.start_time = snapshots[0].scanned_at
+
+        x = np.array([
+            [
+                (
+                    snapshot.scanned_at
+                    - self.start_time
+                ).total_seconds() / 86400
+            ]
+            for snapshot in snapshots
+        ])
+
+        y = np.array([
+            snapshot.total_bytes
+            for snapshot in snapshots
+        ])
+
+        x_poly = self.transformer.fit_transform(x)
+
+        self.model.fit(x_poly, y)
+
+        return self
+
+    def predict(
+        self,
+        future_dates: List[datetime],
+    ) -> np.ndarray:
+
+        if self.start_time is None:
+            raise RuntimeError(
+                "Model must be fitted before prediction."
+            )
+
+        x = np.array([
+            [
+                (
+                    date - self.start_time
+                ).total_seconds() / 86400
+            ]
+            for date in future_dates
+        ])
+
+        x_poly = self.transformer.transform(x)
+
+        predictions = self.model.predict(x_poly)
+
+        return np.maximum(predictions, 0)
+
+
+class HoltWintersForecastModel:
+    """
+    Holt's exponential smoothing model.
+
+    We initially use trend='add' without seasonality because
+    storage snapshots do not yet provide enough history to
+    reliably establish seasonal behavior.
+    """
+
+    def __init__(self):
+        self.model = None
+        self.forecast_model = None
+
+    def fit(self, snapshots: List[Snapshot]):
+        if len(snapshots) < 4:
+            raise ValueError(
+                "At least 4 snapshots are required."
+            )
+
+        snapshots = sorted(
+            snapshots,
+            key=lambda snapshot: snapshot.scanned_at,
+        )
+
+        values = np.array([
+            snapshot.total_bytes
+            for snapshot in snapshots
+        ], dtype=float)
+
+        self.forecast_model = ExponentialSmoothing(
+            values,
+            trend="add",
+            damped_trend=True,
+            initialization_method="estimated",
+        ).fit()
+
+        return self
+
+    def predict(
+        self,
+        steps: int,
+    ) -> np.ndarray:
+
+        if self.forecast_model is None:
+            raise RuntimeError(
+                "Model must be fitted before prediction."
+            )
+
+        predictions = self.forecast_model.forecast(
+            steps
+        )
+
+        return np.maximum(
+            np.asarray(predictions),
+            0,
+        )
+============================================================
+FILE: python-layer/forecast/pipeline.py
+============================================================
+from datetime import datetime, timedelta
+from typing import List
+
+import numpy as np
+
+from core.models import Snapshot
+from .model import (
+    ForecastPoint,
+    LinearForecastModel,
+    PolynomialForecastModel,
+    HoltWintersForecastModel,
+)
+
+
+def create_future_dates(
+    start_date: datetime,
+    days: int,
+) -> List[datetime]:
+    """
+    Create one forecast point per day.
+    """
+
+    return [
+        start_date + timedelta(days=i)
+        for i in range(1, days + 1)
+    ]
+
+
+def forecast_linear(
+    snapshots: List[Snapshot],
+    future_dates: List[datetime],
+) -> List[ForecastPoint]:
+
+    model = LinearForecastModel()
+    model.fit(snapshots)
+
+    predictions = model.predict(
+        future_dates
+    )
+
+    return [
+        ForecastPoint(
+            date=date,
+            predicted_bytes=float(prediction),
+        )
+        for date, prediction
+        in zip(future_dates, predictions)
+    ]
+
+
+def forecast_polynomial(
+    snapshots: List[Snapshot],
+    future_dates: List[datetime],
+    degree: int = 2,
+) -> List[ForecastPoint]:
+
+    model = PolynomialForecastModel(
+        degree=degree
+    )
+
+    model.fit(snapshots)
+
+    predictions = model.predict(
+        future_dates
+    )
+
+    return [
+        ForecastPoint(
+            date=date,
+            predicted_bytes=float(prediction),
+        )
+        for date, prediction
+        in zip(future_dates, predictions)
+    ]
+
+
+def forecast_holt_winters(
+    snapshots: List[Snapshot],
+    future_dates: List[datetime],
+) -> List[ForecastPoint]:
+
+    model = HoltWintersForecastModel()
+    model.fit(snapshots)
+
+    predictions = model.predict(
+        len(future_dates)
+    )
+
+    return [
+        ForecastPoint(
+            date=date,
+            predicted_bytes=float(prediction),
+        )
+        for date, prediction
+        in zip(future_dates, predictions)
+    ]
+============================================================
+FILE: python-layer/recommend/__init__.py
+============================================================
+
+============================================================
+FILE: python-layer/recommend/engine.py
+============================================================
+from dataclasses import dataclass
+from typing import Any, List
+from .rules import (
+    CAPACITY_WARNING_PERCENT,
+    CAPACITY_CRITICAL_PERCENT,
+    HIGH_DAILY_GROWTH_BYTES,
+    DUPLICATE_WARNING_BYTES,
+    DUPLICATE_HIGH_BYTES,
+    STALE_WARNING_BYTES,
+    STALE_HIGH_BYTES,
+    DAYS_TO_CAPACITY_WARNING,
+    DAYS_TO_CAPACITY_CRITICAL,
+)
+
+@dataclass
+class Recommendation:
+    type: str
+    severity: str
+    title: str
+    message: str
+    potential_savings_bytes: int = 0
+    days_until_action: float | None = None
+    metadata: dict | None = None
+
+
+def format_bytes(value: float) -> str:
+    """
+    Convert bytes into a human-readable representation.
+    """
+
+    units = [
+        "B",
+        "KB",
+        "MB",
+        "GB",
+        "TB",
+        "PB",
+    ]
+
+    size = float(value)
+
+    for unit in units:
+
+        if size < 1024:
+            return f"{size:.2f} {unit}"
+
+        size /= 1024
+
+    return f"{size:.2f} EB"
+
+def format_days(days: float) -> str:
+    """
+    Convert a number of days into readable language.
+    """
+
+    if days < 1:
+        hours = days * 24
+
+        return f"{hours:.0f} hours"
+
+    if days < 2:
+        return "1 day"
+
+    return f"{days:.0f} days"
+
+def recommend_duplicates(
+    duplicate_bytes: int,
+) -> Recommendation | None:
+    """
+    Generate a recommendation based on duplicate data.
+    """
+
+    if duplicate_bytes < DUPLICATE_WARNING_BYTES:
+        return None
+
+    if duplicate_bytes >= DUPLICATE_HIGH_BYTES:
+
+        severity = "high"
+
+        title = (
+            "Duplicate files are consuming significant storage"
+        )
+
+        message = (
+            f"You have {format_bytes(duplicate_bytes)} "
+            "in duplicate files. Review duplicate groups "
+            "to reclaim storage space."
+        )
+
+    else:
+
+        severity = "medium"
+
+        title = (
+            "Duplicate files are using extra storage"
+        )
+
+        message = (
+            f"You have {format_bytes(duplicate_bytes)} "
+            "in duplicate files. Reviewing duplicates "
+            "could reclaim some storage."
+        )
+
+    return Recommendation(
+        type="duplicate_cleanup",
+        severity=severity,
+        title=title,
+        message=message,
+        potential_savings_bytes=duplicate_bytes,
+        metadata={
+            "duplicate_bytes": duplicate_bytes,
+        },
+    )
+
+def recommend_stale_files(
+    stale_bytes: int,
+    stale_days: int,
+) -> Recommendation | None:
+    """
+    Generate a recommendation for inactive files.
+    """
+
+    if stale_bytes < STALE_WARNING_BYTES:
+        return None
+
+    if stale_bytes >= STALE_HIGH_BYTES:
+
+        severity = "high"
+
+    else:
+
+        severity = "medium"
+
+    title = (
+        "Inactive files may be using valuable storage"
+    )
+
+    message = (
+        f"{format_bytes(stale_bytes)} of files "
+        f"have not been accessed for more than "
+        f"{stale_days} days. Review old files, "
+        "caches, downloads, and build artifacts."
+    )
+
+    return Recommendation(
+        type="stale_cleanup",
+        severity=severity,
+        title=title,
+        message=message,
+        potential_savings_bytes=stale_bytes,
+        metadata={
+            "stale_bytes": stale_bytes,
+            "stale_days": stale_days,
+        },
+    )
+
+def recommend_growth(
+    daily_growth_bytes: float,
+) -> Recommendation | None:
+    """
+    Detect unusually high storage growth.
+    """
+
+    if daily_growth_bytes < HIGH_DAILY_GROWTH_BYTES:
+        return None
+
+    message = (
+    f"Storage is growing at approximately "
+    f"{format_bytes(daily_growth_bytes)} per day. "
+    "Review recent files, logs, caches, and large "
+    "downloads to identify the source of the growth."
+    )
+
+    return Recommendation(
+        type="high_growth",
+        severity="warning",
+        title="Storage growth is unusually high",
+        message=message,
+        metadata={
+            "daily_growth_bytes": daily_growth_bytes,
+        },
+    )
+
+def recommend_capacity(
+    utilization_percent: float,
+    days_until_90: float | None,
+    days_until_100: float | None,
+) -> Recommendation | None:
+    """
+    Generate recommendations based on current and predicted
+    capacity utilization.
+    """
+
+    # Already critically full
+    if utilization_percent >= CAPACITY_CRITICAL_PERCENT:
+
+        return Recommendation(
+            type="capacity_critical",
+            severity="critical",
+            title="Storage is critically full",
+            message=(
+                f"Storage is currently at "
+                f"{utilization_percent:.1f}% capacity. "
+                "Free space immediately to avoid "
+                "storage-related failures."
+            ),
+            days_until_action=0,
+            metadata={
+                "utilization_percent": utilization_percent,
+            },
+        )
+
+    # Predicted to reach 100% very soon
+    if (
+        days_until_100 is not None
+        and days_until_100 <= DAYS_TO_CAPACITY_CRITICAL
+    ):
+
+        return Recommendation(
+            type="capacity_critical",
+            severity="critical",
+            title="Storage may become full soon",
+            message=(
+                "Storage is projected to reach full capacity "
+                f"in approximately {format_days(days_until_100)}. "
+                "Clean unnecessary files as soon as possible."
+            ),
+            days_until_action=days_until_100,
+            metadata={
+                "utilization_percent": utilization_percent,
+                "days_until_100": days_until_100,
+            },
+        )
+
+    # Predicted 90% within warning period
+    if (
+        days_until_90 is not None
+        and days_until_90 <= DAYS_TO_CAPACITY_WARNING
+    ):
+
+        return Recommendation(
+            type="capacity_warning",
+            severity="warning",
+            title="Storage capacity warning",
+            message=(
+                "Storage is projected to reach 90% capacity "
+                f"in approximately {format_days(days_until_90)}. "
+                "Consider cleaning unnecessary files."
+            ),
+            days_until_action=days_until_90,
+            metadata={
+                "utilization_percent": utilization_percent,
+                "days_until_90": days_until_90,
+            },
+        )
+
+    # Already above warning level
+    if utilization_percent >= CAPACITY_WARNING_PERCENT:
+
+        return Recommendation(
+            type="capacity_warning",
+            severity="warning",
+            title="Storage usage is high",
+            message=(
+                f"Storage is currently at "
+                f"{utilization_percent:.1f}% capacity. "
+                "Consider freeing up space."
+            ),
+            metadata={
+                "utilization_percent": utilization_percent,
+            },
+        )
+
+    return None
+
+def recommend_categories(
+    category_stats: dict,
+) -> list[Recommendation]:
+    """
+    Generate recommendations based on storage categories.
+    """
+
+    recommendations = []
+
+    category_rules = {
+        "temp": (
+            "Temporary files are using storage",
+            "Temporary data may be safely reviewable for cleanup.",
+            "temp_cleanup",
+        ),
+        "system_cache": (
+            "System cache is consuming storage",
+            "Review system cache data to determine whether "
+            "unused cache can be reclaimed.",
+            "cache_cleanup",
+        ),
+        "system_log": (
+            "System logs are consuming storage",
+            "Review older logs and determine whether they "
+            "can be archived or removed.",
+            "log_cleanup",
+        ),
+        "crash_dump": (
+            "Crash dumps are consuming storage",
+            "Old crash dumps can become large. Review "
+            "historical dumps that are no longer required.",
+            "crash_dump_cleanup",
+        ),
+    }
+
+    for category, data in category_stats.items():
+
+        if category not in category_rules:
+            continue
+
+        if not isinstance(data, dict):
+            continue
+
+        bytes_used = data.get("bytes", 0)
+
+        if bytes_used <= 0:
+            continue
+
+        title, advice, recommendation_type = (
+            category_rules[category]
+        )
+
+        recommendations.append(
+            Recommendation(
+                type=recommendation_type,
+                severity="info",
+                title=title,
+                message=(
+                    f"{format_bytes(bytes_used)} "
+                    f"of storage belongs to {category.replace('_', ' ')}. "
+                    f"{advice}"
+                ),
+                metadata={
+                    "category": category,
+                    "bytes": bytes_used,
+                },
+            )
+        )
+
+    return recommendations
+
+def generate_recommendations(
+    duplicate_bytes: int = 0,
+    stale_bytes: int = 0,
+    stale_days: int = 30,
+    daily_growth_bytes: float = 0,
+    utilization_percent: float = 0,
+    days_until_90: float | None = None,
+    days_until_100: float | None = None,
+    category_stats: dict | None = None,
+) -> List[Recommendation]:
+    """
+    Generate all applicable storage recommendations.
+    """
+
+    recommendations = []
+
+    duplicate = recommend_duplicates(
+        duplicate_bytes
+    )
+
+    if duplicate:
+        recommendations.append(
+            duplicate
+        )
+
+    stale = recommend_stale_files(
+        stale_bytes,
+        stale_days,
+    )
+
+    if stale:
+        recommendations.append(
+            stale
+        )
+
+    growth = recommend_growth(
+        daily_growth_bytes
+    )
+
+    if growth:
+        recommendations.append(
+            growth
+        )
+
+    capacity = recommend_capacity(
+        utilization_percent,
+        days_until_90,
+        days_until_100,
+    )
+
+    if capacity:
+        recommendations.append(
+            capacity
+        )
+
+    if category_stats:
+        category_recommendations = (
+            recommend_categories(
+                category_stats
+            )
+        )
+
+        recommendations.extend(
+            category_recommendations
+        )
+
+    # Critical recommendations first
+    severity_order = {
+        "critical": 0,
+        "high": 1,
+        "warning": 2,
+        "medium": 3,
+        "info": 4,
+    }
+
+    recommendations.sort(
+        key=lambda recommendation:
+            severity_order.get(
+                recommendation.severity,
+                99,
+            )
+    )
+
+    return recommendations
+
+
+
+============================================================
+FILE: python-layer/recommend/pipeline.py
+============================================================
+from pathlib import Path
+from typing import Any
+
+from core.mock_provider import MockDataProvider
+
+from forecast.forecast import forecast_storage
+from forecast.capacity import calculate_capacity_prediction
+
+from .engine import generate_recommendations
+from forecast.forecast import forecast_storage
+
+def calculate_duplicate_waste(provider):
+    """
+    Calculate total reclaimable space from duplicate files.
+    """
+
+    clusters = provider.get_duplicates()
+
+    return sum(
+        cluster.wasted_bytes
+        for cluster in clusters
+    )
+
+
+def calculate_stale_storage(provider):
+    """
+    Calculate total storage occupied by stale files.
+    """
+
+    stale_files = provider.get_stale_files()
+
+    return sum(
+        file.size_bytes
+        for file in stale_files
+    )
+
+
+def calculate_daily_growth(snapshots):
+    """
+    Calculate average daily storage growth from snapshots.
+    """
+
+    if len(snapshots) < 2:
+        return 0.0
+
+    snapshots = sorted(
+        snapshots,
+        key=lambda snapshot: snapshot.scanned_at,
+    )
+
+    total_growth = (
+        snapshots[-1].total_bytes
+        - snapshots[0].total_bytes
+    )
+
+    total_days = (
+        snapshots[-1].scanned_at
+        - snapshots[0].scanned_at
+    ).total_seconds() / 86400
+
+    if total_days <= 0:
+        return 0.0
+
+    return total_growth / total_days
+
+
+def run_recommendation_pipeline(
+    data_path: str | Path,
+    total_capacity_bytes: int,
+    forecast_days: int = 365,
+):
+    """
+    Run the complete recommendation pipeline.
+    """
+
+    provider = MockDataProvider(
+        data_path
+    )
+
+    # ----------------------------------------
+    # 1. Fetch data
+    # ----------------------------------------
+
+    snapshots = provider.get_snapshots()
+    category_stats = provider.get_category_stats()
+
+    # ----------------------------------------
+    # 2. Calculate duplicate waste
+    # ----------------------------------------
+
+    duplicate_bytes = calculate_duplicate_waste(
+        provider
+    )
+
+    # ----------------------------------------
+    # 3. Calculate stale storage
+    # ----------------------------------------
+
+    stale_bytes = calculate_stale_storage(
+        provider
+    )
+
+    # ----------------------------------------
+    # 4. Calculate growth
+    # ----------------------------------------
+
+    daily_growth_bytes = calculate_daily_growth(
+        snapshots
+    )
+
+    # ----------------------------------------
+    # 5. Generate forecast
+    # ----------------------------------------
+
+    forecast_result = forecast_storage(
+        snapshots,
+        forecast_days=forecast_days,
+        validation_size=3,
+    )
+
+    # ----------------------------------------
+    # 6. Calculate capacity prediction
+    # ----------------------------------------
+
+    latest_snapshot = snapshots[-1]
+
+    capacity = calculate_capacity_prediction(
+        current_bytes=latest_snapshot.total_bytes,
+        current_date=latest_snapshot.scanned_at,
+        total_capacity_bytes=total_capacity_bytes,
+        forecast_points=forecast_result.forecast_points,
+    )
+
+    # ----------------------------------------
+    # 7. Generate recommendations
+    # ----------------------------------------
+
+    recommendations = generate_recommendations(
+
+        duplicate_bytes=duplicate_bytes,
+
+        stale_bytes=stale_bytes,
+
+        stale_days=30,
+
+        daily_growth_bytes=daily_growth_bytes,
+
+        utilization_percent=(
+            capacity.current_utilization_percent
+        ),
+
+        days_until_90=(
+            capacity.days_until_90_percent
+        ),
+
+        days_until_100=(
+            capacity.days_until_100_percent
+        ),
+
+        category_stats=category_stats,
+    )
+
+    return {
+        "forecast": forecast_result,
+
+        "capacity": capacity,
+
+        "recommendations": recommendations,
+
+        "duplicate_bytes": duplicate_bytes,
+
+        "stale_bytes": stale_bytes,
+
+        "daily_growth_bytes": daily_growth_bytes,
+    }
+
+
+============================================================
+FILE: python-layer/recommend/rules.py
+============================================================
+"""
+Thresholds and rules used by the recommendation engine.
+"""
+
+# ---------------------------------------------------------
+# Storage capacity thresholds
+# ---------------------------------------------------------
+
+CAPACITY_WARNING_PERCENT = 80.0
+CAPACITY_CRITICAL_PERCENT = 90.0
+
+
+# ---------------------------------------------------------
+# Growth thresholds
+# ---------------------------------------------------------
+
+# Daily growth above this is considered significant.
+HIGH_DAILY_GROWTH_BYTES = 2 * 1024 ** 3
+
+
+# ---------------------------------------------------------
+# Duplicate thresholds
+# ---------------------------------------------------------
+
+DUPLICATE_WARNING_BYTES = 1 * 1024 ** 3
+DUPLICATE_HIGH_BYTES = 5 * 1024 ** 3
+
+
+# ---------------------------------------------------------
+# Stale file thresholds
+# ---------------------------------------------------------
+
+STALE_WARNING_BYTES = 1 * 1024 ** 3
+STALE_HIGH_BYTES = 5 * 1024 ** 3
+
+
+# ---------------------------------------------------------
+# Forecast thresholds
+# ---------------------------------------------------------
+
+DAYS_TO_CAPACITY_WARNING = 30
+DAYS_TO_CAPACITY_CRITICAL = 14
+
+
+# ---------------------------------------------------------
+# Staleness thresholds
+# ---------------------------------------------------------
+
+DEFAULT_STALE_DAYS = 30
+HIGH_STALE_DAYS = 60
+============================================================
+FILE: python-layer/service.py
+============================================================
+from pathlib import Path
+from typing import Any
+
+from fastapi import FastAPI, HTTPException
+
+from core.mock_provider import MockDataProvider
+from forecast.pipeline import (
+    create_future_dates,
+    forecast_linear,
+    forecast_polynomial,
+    forecast_holt_winters,
+)
+from forecast.capacity import calculate_capacity_prediction
+from recommend.pipeline import run_recommendation_pipeline
+
+# =========================================================
+# Configuration
+# =========================================================
+
+DATA_PATH = Path("data/mock_data.json")
+
+FORECAST_DAYS = 30
+
+
+# =========================================================
+# FastAPI
+# =========================================================
+
+app = FastAPI(
+    title="Storage Optimizer ML Service",
+    description=(
+        "Python ML, storage forecasting and "
+        "recommendation service"
+    ),
+    version="1.0.0",
+)
+
+
+# =========================================================
+# Helpers
+# =========================================================
+
+def serialize_forecast_points(
+    points,
+) -> list[dict[str, Any]]:
+
+    return [
+        {
+            "date": point.date.isoformat(),
+            "predicted_bytes": point.predicted_bytes,
+            "lower_bound": point.lower_bound,
+            "upper_bound": point.upper_bound,
+        }
+        for point in points
+    ]
+
+def serialize_recommendation(
+    recommendation,
+) -> dict[str, Any]:
+
+    return {
+        "type": recommendation.type,
+        "severity": recommendation.severity,
+        "title": recommendation.title,
+        "message": recommendation.message,
+        "potential_savings_bytes": (
+            recommendation.potential_savings_bytes
+        ),
+        "days_until_action": (
+            recommendation.days_until_action
+        ),
+        "metadata": recommendation.metadata,
+    }
+
+def load_provider() -> MockDataProvider:
+
+    if not DATA_PATH.exists():
+        raise FileNotFoundError(
+            f"Dataset not found: {DATA_PATH}"
+        )
+
+    return MockDataProvider(DATA_PATH)
+
+
+# =========================================================
+# Health
+# =========================================================
+
+@app.get("/health")
+def health():
+
+    return {
+        "service": "storage-optimizer-ml",
+        "status": "healthy",
+        "version": "1.0.0",
+    }
+
+
+# =========================================================
+# Root
+# =========================================================
+
+@app.get("/")
+def root():
+
+    return {
+        "service": "storage-optimizer-ml",
+        "status": "running",
+        "endpoints": [
+    "/health",
+    "/forecast",
+    "/capacity",
+    "/recommendations",
+    "/analysis",
+],
+    }
+
+
+# =========================================================
+# Forecast
+# =========================================================
+
+@app.get("/forecast")
+def forecast():
+
+    try:
+
+        provider = load_provider()
+
+        snapshots = provider.get_snapshots()
+
+        if len(snapshots) < 4:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "At least 4 snapshots are required "
+                    "for forecasting."
+                ),
+            )
+
+        snapshots = sorted(
+            snapshots,
+            key=lambda snapshot: snapshot.scanned_at,
+        )
+
+        current_snapshot = snapshots[-1]
+
+        future_dates = create_future_dates(
+            current_snapshot.scanned_at,
+            FORECAST_DAYS,
+        )
+
+        linear_points = forecast_linear(
+            snapshots,
+            future_dates,
+        )
+
+        polynomial_points = forecast_polynomial(
+            snapshots,
+            future_dates,
+        )
+
+        holt_winters_points = forecast_holt_winters(
+            snapshots,
+            future_dates,
+        )
+
+        return {
+
+            "current": {
+                "date": current_snapshot.scanned_at.isoformat(),
+                "bytes": current_snapshot.total_bytes,
+                "files": current_snapshot.total_files,
+            },
+
+            "forecast_days": FORECAST_DAYS,
+
+            "models": {
+
+                "linear": {
+                    "points": serialize_forecast_points(
+                        linear_points
+                    )
+                },
+
+                "polynomial": {
+                    "degree": 2,
+                    "points": serialize_forecast_points(
+                        polynomial_points
+                    )
+                },
+
+                "holt_winters": {
+                    "points": serialize_forecast_points(
+                        holt_winters_points
+                    )
+                },
+            },
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as exc:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc),
+        )
+
+@app.get("/capacity")
+def capacity():
+
+    try:
+        provider = load_provider()
+
+        snapshots = provider.get_snapshots()
+
+        if len(snapshots) < 4:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "At least 4 snapshots are required "
+                    "for capacity prediction."
+                ),
+            )
+
+        snapshots = sorted(
+            snapshots,
+            key=lambda snapshot: snapshot.scanned_at,
+        )
+
+        current_snapshot = snapshots[-1]
+
+        # Forecast 365 days so we have enough horizon
+        # to detect 90% and 100% capacity.
+        future_dates = create_future_dates(
+            current_snapshot.scanned_at,
+            365,
+        )
+
+        # Polynomial is currently our best-performing
+        # model according to Step 6 evaluation.
+        forecast_points = forecast_polynomial(
+            snapshots,
+            future_dates,
+            degree=2,
+        )
+
+        # Dataset uses a 256 GB disk.
+        total_capacity_bytes = 256 * 1024**3
+
+        prediction = calculate_capacity_prediction(
+            current_bytes=current_snapshot.total_bytes,
+            current_date=current_snapshot.scanned_at,
+            total_capacity_bytes=total_capacity_bytes,
+            forecast_points=forecast_points,
+        )
+
+        return {
+            "model": "Polynomial Regression",
+            "model_degree": 2,
+
+            "current": {
+                "date": current_snapshot.scanned_at.isoformat(),
+                "bytes": prediction.current_bytes,
+                "utilization_percent": (
+                    prediction.current_utilization_percent
+                ),
+            },
+
+            "capacity": {
+                "total_bytes": (
+                    prediction.total_capacity_bytes
+                ),
+                "total_gb": (
+                    prediction.total_capacity_bytes
+                    / (1024**3)
+                ),
+            },
+
+            "thresholds": {
+                "90_percent": {
+                    "bytes": prediction.threshold_90_bytes,
+                    "date": (
+                        prediction.date_at_90_percent.isoformat()
+                        if prediction.date_at_90_percent
+                        else None
+                    ),
+                    "days_until": (
+                        prediction.days_until_90_percent
+                    ),
+                },
+
+                "100_percent": {
+                    "bytes": prediction.threshold_100_bytes,
+                    "date": (
+                        prediction.date_at_100_percent.isoformat()
+                        if prediction.date_at_100_percent
+                        else None
+                    ),
+                    "days_until": (
+                        prediction.days_until_100_percent
+                    ),
+                },
+            },
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as exc:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc),
+        )
+
+
+@app.get("/recommendations")
+def recommendations():
+
+    try:
+
+        result = run_recommendation_pipeline(
+            data_path=DATA_PATH,
+            total_capacity_bytes=256 * 1024**3,
+            forecast_days=365,
+        )
+
+        capacity = result["capacity"]
+
+        recommendations_data = [
+            serialize_recommendation(
+                recommendation
+            )
+            for recommendation
+            in result["recommendations"]
+        ]
+
+        return {
+            "current": {
+                "bytes": capacity.current_bytes,
+                "utilization_percent": (
+                    capacity.current_utilization_percent
+                ),
+            },
+
+            "growth": {
+                "daily_growth_bytes": (
+                    result["daily_growth_bytes"]
+                ),
+            },
+
+            "storage_analysis": {
+                "duplicate_waste_bytes": (
+                    result["duplicate_bytes"]
+                ),
+                "stale_storage_bytes": (
+                    result["stale_bytes"]
+                ),
+            },
+
+            "capacity": {
+                "total_bytes": (
+                    capacity.total_capacity_bytes
+                ),
+
+                "current_bytes": (
+                    capacity.current_bytes
+                ),
+
+                "utilization_percent": (
+                    capacity.current_utilization_percent
+                ),
+
+                "90_percent": {
+                    "date": (
+                        capacity.date_at_90_percent.isoformat()
+                        if capacity.date_at_90_percent
+                        else None
+                    ),
+                    "days_until": (
+                        capacity.days_until_90_percent
+                    ),
+                },
+
+                "100_percent": {
+                    "date": (
+                        capacity.date_at_100_percent.isoformat()
+                        if capacity.date_at_100_percent
+                        else None
+                    ),
+                    "days_until": (
+                        capacity.days_until_100_percent
+                    ),
+                },
+            },
+
+            "recommendations": recommendations_data,
+
+            "recommendation_count": (
+                len(recommendations_data)
+            ),
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as exc:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc),
+        )
+
+@app.get("/analysis")
+def analysis():
+
+    try:
+
+        provider = load_provider()
+
+        snapshots = provider.get_snapshots()
+
+        if len(snapshots) < 4:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "At least 4 snapshots are required "
+                    "for analysis."
+                ),
+            )
+
+        snapshots = sorted(
+            snapshots,
+            key=lambda snapshot: snapshot.scanned_at,
+        )
+
+        current_snapshot = snapshots[-1]
+
+        # ----------------------------------------
+        # Forecast
+        # ----------------------------------------
+
+        future_dates = create_future_dates(
+            current_snapshot.scanned_at,
+            FORECAST_DAYS,
+        )
+
+        linear_points = forecast_linear(
+            snapshots,
+            future_dates,
+        )
+
+        polynomial_points = forecast_polynomial(
+            snapshots,
+            future_dates,
+        )
+
+        holt_winters_points = forecast_holt_winters(
+            snapshots,
+            future_dates,
+        )
+
+        # ----------------------------------------
+        # Capacity
+        # ----------------------------------------
+
+        capacity_dates = create_future_dates(
+            current_snapshot.scanned_at,
+            365,
+        )
+
+        capacity_forecast = forecast_polynomial(
+            snapshots,
+            capacity_dates,
+            degree=2,
+        )
+
+        total_capacity_bytes = 256 * 1024**3
+
+        capacity_prediction = (
+            calculate_capacity_prediction(
+                current_bytes=current_snapshot.total_bytes,
+                current_date=current_snapshot.scanned_at,
+                total_capacity_bytes=total_capacity_bytes,
+                forecast_points=capacity_forecast,
+            )
+        )
+
+        # ----------------------------------------
+        # Recommendations
+        # ----------------------------------------
+
+        recommendation_result = (
+            run_recommendation_pipeline(
+                data_path=DATA_PATH,
+                total_capacity_bytes=total_capacity_bytes,
+                forecast_days=365,
+            )
+        )
+
+        recommendations = (
+            recommendation_result["recommendations"]
+        )
+
+        # ----------------------------------------
+        # Category statistics
+        # ----------------------------------------
+
+        category_stats = (
+            provider.get_category_stats()
+        )
+
+        return {
+
+            "current": {
+                "date": (
+                    current_snapshot.scanned_at.isoformat()
+                ),
+                "bytes": current_snapshot.total_bytes,
+                "files": current_snapshot.total_files,
+            },
+
+            "forecast": {
+                "days": FORECAST_DAYS,
+
+                "models": {
+
+                    "linear": {
+                        "points": (
+                            serialize_forecast_points(
+                                linear_points
+                            )
+                        )
+                    },
+
+                    "polynomial": {
+                        "degree": 2,
+                        "points": (
+                            serialize_forecast_points(
+                                polynomial_points
+                            )
+                        )
+                    },
+
+                    "holt_winters": {
+                        "points": (
+                            serialize_forecast_points(
+                                holt_winters_points
+                            )
+                        )
+                    },
+                },
+            },
+
+            "capacity": {
+                "model": "Polynomial Regression",
+                "model_degree": 2,
+
+                "total_bytes": (
+                    capacity_prediction.total_capacity_bytes
+                ),
+
+                "total_gb": (
+                    capacity_prediction.total_capacity_bytes
+                    / (1024**3)
+                ),
+
+                "utilization_percent": (
+                    capacity_prediction
+                    .current_utilization_percent
+                ),
+
+                "thresholds": {
+
+                    "90_percent": {
+                        "bytes": (
+                            capacity_prediction
+                            .threshold_90_bytes
+                        ),
+
+                        "date": (
+                            capacity_prediction
+                            .date_at_90_percent
+                            .isoformat()
+                            if capacity_prediction
+                            .date_at_90_percent
+                            else None
+                        ),
+
+                        "days_until": (
+                            capacity_prediction
+                            .days_until_90_percent
+                        ),
+                    },
+
+                    "100_percent": {
+                        "bytes": (
+                            capacity_prediction
+                            .threshold_100_bytes
+                        ),
+
+                        "date": (
+                            capacity_prediction
+                            .date_at_100_percent
+                            .isoformat()
+                            if capacity_prediction
+                            .date_at_100_percent
+                            else None
+                        ),
+
+                        "days_until": (
+                            capacity_prediction
+                            .days_until_100_percent
+                        ),
+                    },
+                },
+            },
+
+            "storage": {
+                "duplicate_bytes": (
+                    recommendation_result[
+                        "duplicate_bytes"
+                    ]
+                ),
+
+                "stale_bytes": (
+                    recommendation_result[
+                        "stale_bytes"
+                    ]
+                ),
+
+                "daily_growth_bytes": (
+                    recommendation_result[
+                        "daily_growth_bytes"
+                    ]
+                ),
+            },
+
+            "categories": category_stats,
+
+            "recommendations": [
+                serialize_recommendation(
+                    recommendation
+                )
+                for recommendation in recommendations
+            ],
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as exc:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc),
+        ) 
+============================================================
+FILE: python-layer/test_capacity.py
+============================================================
+from forecast.capacity_pipeline import (
+    run_capacity_prediction,
+)
+
+
+GB = 1024 ** 3
+
+
+def format_bytes(value: float) -> str:
+    units = ["B", "KB", "MB", "GB", "TB"]
+
+    size = float(value)
+
+    for unit in units:
+
+        if size < 1024:
+            return f"{size:.2f} {unit}"
+
+        size /= 1024
+
+    return f"{size:.2f} PB"
+
+
+def main():
+
+    # Mock disk capacity = 256 GB
+
+    total_capacity = 256 * GB
+
+    forecast_result, capacity = (
+        run_capacity_prediction(
+            total_capacity_bytes=total_capacity,
+            forecast_days=365,
+        )
+    )
+
+    print("\n=== CAPACITY PREDICTION ===")
+
+    print(
+        f"Selected model: "
+        f"{forecast_result.model_name}"
+    )
+
+    print(
+        f"Total capacity: "
+        f"{format_bytes(capacity.total_capacity_bytes)}"
+    )
+
+    print(
+        f"Current storage: "
+        f"{format_bytes(capacity.current_bytes)}"
+    )
+
+    print(
+        f"Current utilization: "
+        f"{capacity.current_utilization_percent:.2f}%"
+    )
+
+    print("\n=== THRESHOLDS ===")
+
+    print(
+        f"90% threshold: "
+        f"{format_bytes(capacity.threshold_90_bytes)}"
+    )
+
+    print(
+        f"100% threshold: "
+        f"{format_bytes(capacity.threshold_100_bytes)}"
+    )
+
+    print("\n=== PREDICTIONS ===")
+
+    if capacity.date_at_90_percent:
+        print(
+            f"90% capacity: "
+            f"{capacity.date_at_90_percent}"
+        )
+
+        print(
+            f"Days until 90%: "
+            f"{capacity.days_until_90_percent:.1f}"
+        )
+
+    else:
+        print(
+            "90% capacity: "
+            "Not reached within forecast window"
+        )
+
+    if capacity.date_at_100_percent:
+        print(
+            f"100% capacity: "
+            f"{capacity.date_at_100_percent}"
+        )
+
+        print(
+            f"Days until 100%: "
+            f"{capacity.days_until_100_percent:.1f}"
+        )
+
+    else:
+        print(
+            "100% capacity: "
+            "Not reached within forecast window"
+        )
+
+
+if __name__ == "__main__":
+    main()
+============================================================
+FILE: python-layer/test_forecast.py
+============================================================
+from pathlib import Path
+
+from core.mock_provider import MockDataProvider
+
+from forecast.pipeline import (
+    create_future_dates,
+    forecast_linear,
+    forecast_polynomial,
+    forecast_holt_winters,
+)
+
+
+def format_bytes(value: float) -> str:
+    units = ["B", "KB", "MB", "GB", "TB"]
+
+    size = float(value)
+
+    for unit in units:
+        if size < 1024:
+            return f"{size:.2f} {unit}"
+
+        size /= 1024
+
+    return f"{size:.2f} PB"
+
+
+def main():
+
+    provider = MockDataProvider(
+        Path("data/mock_data.json")
+    )
+
+    snapshots = provider.get_snapshots()
+
+    latest_date = snapshots[-1].scanned_at
+
+    future_dates = create_future_dates(
+        latest_date,
+        days=30,
+    )
+
+    print("\n=== LINEAR REGRESSION ===")
+
+    linear = forecast_linear(
+        snapshots,
+        future_dates,
+    )
+
+    for point in linear[::5]:
+        print(
+            f"{point.date.date()} -> "
+            f"{format_bytes(point.predicted_bytes)}"
+        )
+
+    print("\n=== POLYNOMIAL REGRESSION ===")
+
+    polynomial = forecast_polynomial(
+        snapshots,
+        future_dates,
+        degree=2,
+    )
+
+    for point in polynomial[::5]:
+        print(
+            f"{point.date.date()} -> "
+            f"{format_bytes(point.predicted_bytes)}"
+        )
+
+    print("\n=== HOLT-WINTERS ===")
+
+    holt = forecast_holt_winters(
+        snapshots,
+        future_dates,
+    )
+
+    for point in holt[::5]:
+        print(
+            f"{point.date.date()} -> "
+            f"{format_bytes(point.predicted_bytes)}"
+        )
+
+
+if __name__ == "__main__":
+    main()
+============================================================
+FILE: python-layer/test_full_forecast.py
+============================================================
+from pathlib import Path
+
+from core.mock_provider import MockDataProvider
+from forecast.forecast import forecast_storage
+
+
+def format_bytes(value: float) -> str:
+    units = ["B", "KB", "MB", "GB", "TB"]
+
+    size = float(value)
+
+    for unit in units:
+
+        if size < 1024:
+            return f"{size:.2f} {unit}"
+
+        size /= 1024
+
+    return f"{size:.2f} PB"
+
+
+def main():
+
+    provider = MockDataProvider(
+        Path("data/mock_data.json")
+    )
+
+    snapshots = provider.get_snapshots()
+
+    result = forecast_storage(
+        snapshots,
+        forecast_days=30,
+        validation_size=3,
+    )
+
+    print("\n=== STORAGE FORECAST ===")
+
+    print(
+        f"Selected model: "
+        f"{result.model_name}"
+    )
+
+    print(
+        f"Validation MAE: "
+        f"{format_bytes(result.mae_bytes)}"
+    )
+
+    print(
+        f"Validation RMSE: "
+        f"{format_bytes(result.rmse_bytes)}"
+    )
+
+    print("\n=== FORECAST ===")
+
+    for point in result.forecast_points[::5]:
+
+        print(
+            f"{point.date.date()} -> "
+            f"{format_bytes(point.predicted_bytes)}"
+        )
+
+
+if __name__ == "__main__":
+    main()
+============================================================
+FILE: python-layer/test_growth.py
+============================================================
+from pathlib import Path
+
+from core.mock_provider import MockDataProvider
+from forecast.growth import (
+    calculate_growth_metrics,
+    calculate_growth_points,
+)
+
+
+def format_bytes(value: float) -> str:
+    units = ["B", "KB", "MB", "GB", "TB"]
+
+    size = float(value)
+
+    for unit in units:
+        if size < 1024:
+            return f"{size:.2f} {unit}"
+
+        size /= 1024
+
+    return f"{size:.2f} PB"
+
+
+def main():
+    provider = MockDataProvider(
+        Path("data/mock_data.json")
+    )
+
+    snapshots = provider.get_snapshots()
+
+    metrics = calculate_growth_metrics(
+        snapshots
+    )
+
+    points = calculate_growth_points(
+        snapshots
+    )
+
+    print("\n=== STORAGE GROWTH ANALYSIS ===")
+
+    print(
+        f"Snapshots analyzed: "
+        f"{metrics.snapshot_count}"
+    )
+
+    print(
+        f"Current storage: "
+        f"{format_bytes(metrics.current_bytes)}"
+    )
+
+    print(
+        f"Current files: "
+        f"{metrics.current_files:,}"
+    )
+
+    print(
+        f"Total growth: "
+        f"{format_bytes(metrics.total_growth_bytes)}"
+    )
+
+    print(
+        f"Total growth percentage: "
+        f"{metrics.total_growth_percent:.2f}%"
+    )
+
+    print(
+        f"Average daily growth: "
+        f"{format_bytes(metrics.daily_growth_rate_bytes)}"
+    )
+
+    print(
+        f"Average weekly growth: "
+        f"{format_bytes(metrics.weekly_growth_rate_bytes)}"
+    )
+
+    print(
+        f"Growth volatility: "
+        f"{format_bytes(metrics.growth_volatility_bytes)}"
+    )
+
+    print("\n=== GROWTH POINTS ===")
+
+    for point in points:
+        print(
+            f"{point.timestamp} | "
+            f"storage={format_bytes(point.bytes)} | "
+            f"growth={format_bytes(point.growth_bytes)} | "
+            f"daily={format_bytes(point.growth_rate_bytes_per_day)}"
+        )
+
+
+if __name__ == "__main__":
+    main()
+============================================================
+FILE: python-layer/test_model_evaluation.py
+============================================================
+from pathlib import Path
+
+from core.mock_provider import MockDataProvider
+
+from forecast.evaluation import evaluate_models
+
+
+def format_bytes(value: float) -> str:
+    units = ["B", "KB", "MB", "GB", "TB"]
+
+    size = float(value)
+
+    for unit in units:
+
+        if size < 1024:
+            return f"{size:.2f} {unit}"
+
+        size /= 1024
+
+    return f"{size:.2f} PB"
+
+
+def main():
+
+    provider = MockDataProvider(
+        Path("data/mock_data.json")
+    )
+
+    snapshots = provider.get_snapshots()
+
+    results = evaluate_models(
+        snapshots,
+        test_size=3,
+    )
+
+    print("\n=== MODEL EVALUATION ===")
+
+    for result in results:
+
+        print(
+            f"\n{result.model_name}"
+        )
+
+        print(
+            f"MAE: "
+            f"{format_bytes(result.mae_bytes)}"
+        )
+
+        print(
+            f"RMSE: "
+            f"{format_bytes(result.rmse_bytes)}"
+        )
+
+    best_model = min(
+        results,
+        key=lambda result: result.mae_bytes,
+    )
+
+    print("\n=== BEST MODEL ===")
+
+    print(
+        f"{best_model.model_name}"
+    )
+
+    print(
+        f"MAE: "
+        f"{format_bytes(best_model.mae_bytes)}"
+    )
+
+
+if __name__ == "__main__":
+    main()
+============================================================
+FILE: python-layer/test_provider.py
+============================================================
+from pathlib import Path
+
+from core.mock_provider import MockDataProvider
+
+
+DATA_PATH = Path("data/mock_data.json")
+
+
+def main():
+    provider = MockDataProvider(DATA_PATH)
+
+    snapshots = provider.get_snapshots()
+    categories = provider.get_category_stats()
+    stale_files = provider.get_stale_files()
+    duplicates = provider.get_duplicates()
+    actions = provider.get_action_history()
+
+    print("\n=== STORAGE SNAPSHOTS ===")
+    print(f"Number of snapshots: {len(snapshots)}")
+
+    if snapshots:
+        print(f"First snapshot: {snapshots[0]}")
+        print(f"Latest snapshot: {snapshots[-1]}")
+
+    print("\n=== CATEGORIES ===")
+
+    for category, stats in categories.items():
+        print(
+            f"{category}: "
+            f"{stats['files']} files, "
+            f"{stats['bytes']} bytes"
+        )
+
+    print("\n=== STALE FILES ===")
+    print(f"Number of stale files: {len(stale_files)}")
+
+    for file in stale_files:
+        print(
+            f"{file.path} -> "
+            f"{file.size_bytes} bytes "
+            f"(score={file.staleness_score})"
+        )
+
+    print("\n=== DUPLICATES ===")
+    print(f"Duplicate clusters: {len(duplicates)}")
+
+    for cluster in duplicates:
+        print(
+            f"{cluster.hash}: "
+            f"{cluster.wasted_bytes} wasted bytes"
+        )
+
+    print("\n=== ACTION HISTORY ===")
+    print(f"Actions: {len(actions)}")
+
+    for action in actions:
+        print(
+            f"{action.action}: "
+            f"{action.path} "
+            f"({action.size_bytes} bytes)"
+        )
+
+
+if __name__ == "__main__":
+    main()
+============================================================
+FILE: python-layer/test_recommendation_pipeline.py
+============================================================
+from pathlib import Path
+
+from recommend.pipeline import (
+    run_recommendation_pipeline,
+)
+
+
+GB = 1024 ** 3
+
+
+def format_bytes(value: float) -> str:
+
+    units = [
+        "B",
+        "KB",
+        "MB",
+        "GB",
+        "TB",
+    ]
+
+    size = float(value)
+
+    for unit in units:
+
+        if size < 1024:
+            return f"{size:.2f} {unit}"
+
+        size /= 1024
+
+    return f"{size:.2f} PB"
+
+
+def main():
+
+    result = run_recommendation_pipeline(
+
+        data_path=Path(
+            "data/mock_data.json"
+        ),
+
+        total_capacity_bytes=256 * GB,
+
+        forecast_days=365,
+    )
+
+    print(
+        "\n=== RECOMMENDATION PIPELINE ==="
+    )
+
+    print(
+        "\n=== INPUT ANALYSIS ==="
+    )
+
+    print(
+        "Duplicate waste:",
+        format_bytes(
+            result["duplicate_bytes"]
+        ),
+    )
+
+    print(
+        "Stale storage:",
+        format_bytes(
+            result["stale_bytes"]
+        ),
+    )
+
+    print(
+        "Average daily growth:",
+        format_bytes(
+            result["daily_growth_bytes"]
+        ),
+    )
+
+    capacity = result["capacity"]
+
+    print(
+        "\n=== CAPACITY ==="
+    )
+
+    print(
+        "Current utilization:",
+        f"{capacity.current_utilization_percent:.2f}%",
+    )
+
+    print(
+        "90% date:",
+        capacity.date_at_90_percent,
+    )
+
+    print(
+        "100% date:",
+        capacity.date_at_100_percent,
+    )
+
+    print(
+        "Days until 90%:",
+        capacity.days_until_90_percent,
+    )
+
+    print(
+        "Days until 100%:",
+        capacity.days_until_100_percent,
+    )
+
+    print(
+        "\n=== RECOMMENDATIONS ==="
+    )
+
+    for index, recommendation in enumerate(
+        result["recommendations"],
+        start=1,
+    ):
+
+        print(
+            f"\n[{index}] "
+            f"{recommendation.severity.upper()}"
+        )
+
+        print(
+            f"Type: {recommendation.type}"
+        )
+
+        print(
+            f"Title: {recommendation.title}"
+        )
+
+        print(
+            f"Message: {recommendation.message}"
+        )
+
+        if recommendation.potential_savings_bytes:
+
+            print(
+                "Potential savings:",
+                format_bytes(
+                    recommendation.potential_savings_bytes
+                ),
+            )
+
+
+if __name__ == "__main__":
+    main()
+============================================================
+FILE: python-layer/test_recommendations.py
+============================================================
+from recommend.engine import (
+    generate_recommendations,
+)
+
+
+GB = 1024 ** 3
+
+
+def main():
+
+    recommendations = generate_recommendations(
+
+        duplicate_bytes=8 * GB,
+
+        stale_bytes=12 * GB,
+
+        stale_days=60,
+
+        daily_growth_bytes=2.4 * GB,
+
+        utilization_percent=58.1,
+
+        days_until_90=37,
+
+        days_until_100=46,
+    )
+
+    print("\n=== STORAGE RECOMMENDATIONS ===")
+
+    for index, recommendation in enumerate(
+        recommendations,
+        start=1,
+    ):
+
+        print(
+            f"\n[{index}] "
+            f"{recommendation.severity.upper()}"
+        )
+
+        print(
+            f"Type: "
+            f"{recommendation.type}"
+        )
+
+        print(
+            f"Title: "
+            f"{recommendation.title}"
+        )
+
+        print(
+            f"Message: "
+            f"{recommendation.message}"
+        )
+
+        if recommendation.potential_savings_bytes:
+
+            print(
+                "Potential savings: "
+                f"{recommendation.potential_savings_bytes / GB:.2f} GB"
+            )
+
+        if recommendation.days_until_action is not None:
+
+            print(
+                "Days until action: "
+                f"{recommendation.days_until_action:.1f}"
+            )
+
+
+if __name__ == "__main__":
+    main()
+============================================================
+FILE: python-layer/tests/test_forecast.py
+============================================================
+
+============================================================
+FILE: python-layer/tests/test_recommendations.py
+============================================================
+
+===== REQUIREMENTS =====
+# Core Data Science & ML
+pandas>=2.0.0
+numpy>=1.24.0
+scikit-learn>=1.3.0
+statsmodels>=0.14.0
+
+# HTTP & API Services
+requests>=2.31.0
+fastapi>=0.104.0
+uvicorn>=0.24.0
+pydantic>=2.4.0
+
+# Optional Visualization & Testing
+pytest>=7.4.0
