@@ -1,5 +1,10 @@
 import numpy as np
-from sklearn.metrics import mean_absolute_error, mean_squared_error
+
+try:
+    from sklearn.metrics import mean_absolute_error, mean_squared_error
+    _HAS_SKLEARN = True
+except ImportError:
+    _HAS_SKLEARN = False
 
 
 def calculate_mae(
@@ -9,13 +14,14 @@ def calculate_mae(
     """
     Mean Absolute Error.
     """
-
-    return float(
-        mean_absolute_error(
-            actual,
-            predicted,
+    if _HAS_SKLEARN:
+        return float(
+            mean_absolute_error(
+                actual,
+                predicted,
+            )
         )
-    )
+    return float(np.mean(np.abs(np.asarray(actual) - np.asarray(predicted))))
 
 
 def calculate_rmse(
@@ -25,12 +31,13 @@ def calculate_rmse(
     """
     Root Mean Squared Error.
     """
-
-    return float(
-        np.sqrt(
-            mean_squared_error(
-                actual,
-                predicted,
+    if _HAS_SKLEARN:
+        return float(
+            np.sqrt(
+                mean_squared_error(
+                    actual,
+                    predicted,
+                )
             )
         )
-    )
+    return float(np.sqrt(np.mean((np.asarray(actual) - np.asarray(predicted)) ** 2)))

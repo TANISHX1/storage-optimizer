@@ -134,7 +134,7 @@ def evaluate_models(
     test_size: int = 3,
 ) -> List[ModelEvaluation]:
 
-    if len(snapshots) <= test_size:
+    if len(snapshots) < 3:
         raise ValueError(
             "Not enough snapshots for validation."
         )
@@ -144,30 +144,37 @@ def evaluate_models(
         key=lambda snapshot: snapshot.scanned_at,
     )
 
-    train = snapshots[:-test_size]
-    test = snapshots[-test_size:]
+    effective_test_size = max(1, min(test_size, len(snapshots) - 2))
+    train = snapshots[:-effective_test_size]
+    test = snapshots[-effective_test_size:]
 
     results = []
 
-    results.append(
-        evaluate_linear(
-            train,
-            test,
+    if len(train) >= 2:
+        results.append(
+            evaluate_linear(
+                train,
+                test,
+            )
         )
-    )
 
-    results.append(
-        evaluate_polynomial(
-            train,
-            test,
+    if len(train) >= 3:
+        results.append(
+            evaluate_polynomial(
+                train,
+                test,
+            )
         )
-    )
 
-    results.append(
-        evaluate_holt_winters(
-            train,
-            test,
+    if len(train) >= 4:
+        results.append(
+            evaluate_holt_winters(
+                train,
+                test,
+            )
         )
-    )
+
+    if not results:
+        raise ValueError("Not enough training snapshots to evaluate any model.")
 
     return results

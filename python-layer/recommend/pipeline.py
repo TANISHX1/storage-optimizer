@@ -124,7 +124,7 @@ def run_recommendation_pipeline(
 
         forecast_status = history_status.status
 
-        if forecast_status == "ready":
+        if len(root_snapshots) >= 2:
             try:
                 forecast_result = forecast_storage_from_provider(
                     provider=provider,
@@ -138,13 +138,13 @@ def run_recommendation_pipeline(
 
     else:
         history_status = get_forecast_status(
-        snapshots,
-        root=None,
+            snapshots,
+            root=None,
         )
 
         forecast_status = history_status.status
 
-        if forecast_status == "ready":
+        if len(snapshots) >= 2:
             try:
                 forecast_result = forecast_storage(
                     snapshots=snapshots,
