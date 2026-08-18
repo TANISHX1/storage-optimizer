@@ -1,19 +1,43 @@
 from pathlib import Path
 
-from core.mock_provider import MockDataProvider
+from core.synthetic_provider import (
+    SyntheticDataProvider,
+)
 
-from forecast.evaluation import evaluate_models
+from forecast.evaluation import (
+    evaluate_models,
+    select_best_model,
+)
 
 
-def format_bytes(value: float) -> str:
-    units = ["B", "KB", "MB", "GB", "TB"]
+DATA_PATH = Path(
+    "data/synthetic_arima.csv"
+)
+
+
+def format_bytes(
+    value: float | None,
+) -> str:
+
+    if value is None:
+        return "N/A"
+
+    units = [
+        "B",
+        "KB",
+        "MB",
+        "GB",
+        "TB",
+    ]
 
     size = float(value)
 
     for unit in units:
 
         if size < 1024:
-            return f"{size:.2f} {unit}"
+            return (
+                f"{size:.2f} {unit}"
+            )
 
         size /= 1024
 
@@ -22,18 +46,20 @@ def format_bytes(value: float) -> str:
 
 def main():
 
-    provider = MockDataProvider(
-        Path("data/mock_data.json")
+    provider = SyntheticDataProvider(
+        DATA_PATH
     )
 
     snapshots = provider.get_snapshots()
 
     results = evaluate_models(
         snapshots,
-        test_size=3,
+        test_size=30,
     )
 
-    print("\n=== MODEL EVALUATION ===")
+    print(
+        "\n=== MODEL EVALUATION ==="
+    )
 
     for result in results:
 
@@ -42,30 +68,66 @@ def main():
         )
 
         print(
-            f"MAE: "
-            f"{format_bytes(result.mae_bytes)}"
+            f"Status: "
+            f"{result.status}"
         )
 
-        print(
-            f"RMSE: "
-            f"{format_bytes(result.rmse_bytes)}"
-        )
+        if result.status == "valid":
 
-    best_model = min(
-        results,
-        key=lambda result: result.mae_bytes,
+            print(
+                f"MAE: "
+                f"{format_bytes(result.mae_bytes)}"
+            )
+
+            print(
+                f"RMSE: "
+                f"{format_bytes(result.rmse_bytes)}"
+            )
+
+            print(
+                f"MAPE: "
+                f"{result.mape_percent:.3f}%"
+            )
+
+        else:
+
+            print(
+                f"Reason: "
+                f"{result.reason}"
+            )
+
+    best = select_best_model(
+        results
     )
 
-    print("\n=== BEST MODEL ===")
+    print(
+        "\n=== BEST VALID MODEL ==="
+    )
 
     print(
-        f"{best_model.model_name}"
+        f"Model: {best.model_name}"
     )
 
     print(
         f"MAE: "
-        f"{format_bytes(best_model.mae_bytes)}"
+        f"{format_bytes(best.mae_bytes)}"
     )
+
+    print(
+        f"RMSE: "
+        f"{format_bytes(best.rmse_bytes)}"
+    )
+
+    print(
+        f"MAPE: "
+        f"{best.mape_percent:.3f}%"
+    )
+
+    if best.arima_order:
+        print(
+            f"ARIMA order: "
+            f"{best.arima_order}"
+        )
 
 
 if __name__ == "__main__":

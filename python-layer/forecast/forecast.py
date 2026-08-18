@@ -6,7 +6,10 @@ from typing import List
 from core.models import Snapshot
 from core.provider import DataProvider
 
-from .evaluation import evaluate_models
+from .evaluation import (
+    evaluate_models,
+    select_best_model,
+)
 from .pipeline import (
     create_future_dates,
     forecast_linear,
@@ -14,7 +17,10 @@ from .pipeline import (
     forecast_holt_winters,
 )
 from .model import ForecastPoint
-
+from .arima_model import (
+    ARIMAForecastModel,
+    ARIMAConfig,
+)
 
 MIN_FORECAST_SNAPSHOTS = 7
 MIN_HISTORY_DAYS = 7
@@ -32,8 +38,13 @@ class ForecastStatus:
 class ForecastResult:
     model_name: str
     forecast_points: List[ForecastPoint]
+
     mae_bytes: float
     rmse_bytes: float
+
+    mape_percent: float
+
+    arima_order: tuple[int, int, int] | None = None
 
 def get_history_span_days(
     snapshots: list[Snapshot],
@@ -74,8 +85,9 @@ def get_forecast_status(
             snapshots_available=len(valid_snapshots),
             snapshots_required=MIN_FORECAST_SNAPSHOTS,
             message=(
-                f"Forecasting requires at least "
-                f"{MIN_FORECAST_SNAPSHOTS} valid snapshots."
+                f"Only {history_days:.2f} days of history are available. "
+                f"At least {MIN_HISTORY_DAYS} days are required "
+                f"for reliable long-range forecasting."
             ),
         )
 
@@ -177,14 +189,10 @@ def forecast_storage_from_provider(
 def forecast_storage(
     snapshots: List[Snapshot],
     forecast_days: int = 30,
-    validation_size: int = 3,
+    validation_size: int = 30,
 ) -> ForecastResult:
-    """
-    Select the best forecasting model using chronological
-    validation and generate future storage predictions.
-    """
 
-    if len(snapshots) < validation_size + 3:
+    if len(snapshots) < validation_size + 10:
         raise ValueError(
             "Not enough snapshots for forecasting."
         )
@@ -195,7 +203,7 @@ def forecast_storage(
     )
 
     # ----------------------------------------
-    # 1. Evaluate candidate models
+    # 1. Evaluate models
     # ----------------------------------------
 
     evaluations = evaluate_models(
@@ -204,16 +212,15 @@ def forecast_storage(
     )
 
     # ----------------------------------------
-    # 2. Select model with lowest MAE
+    # 2. Select best valid model
     # ----------------------------------------
 
-    best = min(
-        evaluations,
-        key=lambda result: result.mae_bytes,
+    best = select_best_model(
+        evaluations
     )
 
     # ----------------------------------------
-    # 3. Generate future dates
+    # 3. Future dates
     # ----------------------------------------
 
     latest_date = snapshots[-1].scanned_at
@@ -224,7 +231,7 @@ def forecast_storage(
     )
 
     # ----------------------------------------
-    # 4. Train selected model on ALL data
+    # 4. Fit winner on ALL history
     # ----------------------------------------
 
     if best.model_name == "Linear Regression":
@@ -234,7 +241,9 @@ def forecast_storage(
             future_dates,
         )
 
-    elif best.model_name == "Polynomial Regression (degree=2)":
+    elif best.model_name == (
+        "Polynomial Regression (degree=2)"
+    ):
 
         forecast_points = forecast_polynomial(
             snapshots,
@@ -249,7 +258,27 @@ def forecast_storage(
             future_dates,
         )
 
+    elif best.arima_order is not None:
+
+        model = ARIMAForecastModel(
+            ARIMAConfig(
+                p=best.arima_order[0],
+                d=best.arima_order[1],
+                q=best.arima_order[2],
+                confidence_level=0.95,
+            )
+        )
+
+        model.fit(
+            snapshots
+        )
+
+        forecast_points = model.predict(
+            future_dates
+        )
+
     else:
+
         raise RuntimeError(
             f"Unknown model: {best.model_name}"
         )
@@ -259,4 +288,6 @@ def forecast_storage(
         forecast_points=forecast_points,
         mae_bytes=best.mae_bytes,
         rmse_bytes=best.rmse_bytes,
+        mape_percent=best.mape_percent,
+        arima_order=best.arima_order,
     )
