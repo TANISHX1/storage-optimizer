@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"runtime"
 	"sync"
@@ -67,7 +68,7 @@ func New(database *db.DB, cfg Config) *Engine {
 	}
 }
 
-// Execute runs the full two-pass duplicate detection pipeline.
+// Execute runs the full two-pass duplicate detection pipeline and persists group IDs.
 func (e *Engine) Execute(ctx context.Context) (*models.DedupReport, error) {
 	startTime := time.Now()
 
@@ -80,6 +81,7 @@ func (e *Engine) Execute(ctx context.Context) (*models.DedupReport, error) {
 	}
 
 	if len(candidates) == 0 {
+		_ = e.db.AssignDuplicateGroups(ctx)
 		return &models.DedupReport{
 			Duration: time.Since(startTime),
 		}, nil
@@ -103,29 +105,65 @@ func (e *Engine) Execute(ctx context.Context) (*models.DedupReport, error) {
 	}
 
 	// ------------------------------------------------------------------------
+	// PASS 3: Precompute & Index duplicate_group_id Clusters in SQLite
+	// ------------------------------------------------------------------------
+	if err := e.db.AssignDuplicateGroups(ctx); err != nil {
+		return nil, fmt.Errorf("failed to precompute duplicate group IDs: %w", err)
+	}
+
+	// ------------------------------------------------------------------------
 	// AGGREGATION: Query & Format Duplicate Clusters
 	// ------------------------------------------------------------------------
-	groups, err := e.db.GetDuplicateGroups(ctx)
+	groups, totalGroups, totalDupFiles, totalWasted, err := e.db.GetDuplicateGroupsPaginated(ctx, 1, 10000)
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve duplicate groups: %w", err)
 	}
 
-	var totalWasted int64
-	var totalDupFiles int
-	for _, g := range groups {
-		totalWasted += g.WastedBytes
-		totalDupFiles += g.DuplicateCount
-	}
-
 	report := &models.DedupReport{
-		TotalGroups:         len(groups),
+		TotalGroups:         totalGroups,
 		TotalDuplicateFiles: totalDupFiles,
 		TotalWastedBytes:    totalWasted,
+		Page:                1,
+		Limit:               len(groups),
+		TotalPages:          1,
 		Groups:              groups,
 		Duration:            time.Since(startTime),
 	}
 
 	return report, nil
+}
+
+// GetDuplicatesReportPaginated queries SQLite for duplicate clusters without running re-hashing (Pure Read).
+func (e *Engine) GetDuplicatesReportPaginated(ctx context.Context, page int, limit int) (*models.DedupReport, error) {
+	startTime := time.Now()
+
+	if page <= 0 {
+		page = 1
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+
+	groups, totalGroups, totalDupFiles, totalWasted, err := e.db.GetDuplicateGroupsPaginated(ctx, page, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query duplicate groups: %w", err)
+	}
+
+	totalPages := 0
+	if totalGroups > 0 {
+		totalPages = int(math.Ceil(float64(totalGroups) / float64(limit)))
+	}
+
+	return &models.DedupReport{
+		TotalGroups:         totalGroups,
+		TotalDuplicateFiles: totalDupFiles,
+		TotalWastedBytes:    totalWasted,
+		Page:                page,
+		Limit:               limit,
+		TotalPages:          totalPages,
+		Groups:              groups,
+		Duration:            time.Since(startTime),
+	}, nil
 }
 
 // hashCandidates distributes candidate files across a worker pool to compute SHA-256 hashes.

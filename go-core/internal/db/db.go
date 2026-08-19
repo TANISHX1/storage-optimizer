@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,24 +15,20 @@ import (
 )
 
 // ============================================================================
-// SQLITE SINGLE-WRITER STORAGE ENGINE
+// SQLITE SINGLE-WRITER STORAGE ENGINE (OPTIMIZED WAL MODE & INDEXED QUERIES)
 //
-// INCREMENTAL RE-SCANNING & AUDIT INTEGRITY (PHASE 4):
-// 1. Hash Invalidation on Modification:
-//    - When an existing file is re-scanned, SQLite compares the incoming `mtime` and `size`
-//      against stored values using a SQL CASE expression.
-//    - If mtime/size changed: `content_hash` and `staleness_score` are reset to NULL,
-//      forcing duplicate and staleness engines to re-evaluate only the modified files.
-//    - If unchanged: existing hashes/scores are preserved, making re-scans zero-cost for I/O.
+// SYSTEMS & CONCURRENCY OPTIMIZATIONS:
+// 1. WAL Mode & Zero Reader Blocking:
+//    - SQLite WAL (Write-Ahead Logging) enables concurrent readers without waiting for writers.
+//    - Busy timeout is set to 5000ms to eliminate locking contention.
 //
-// 2. Stale Row Pruning:
-//    - Detects files that were deleted or moved outside the application.
-//    - Queries records where `last_scanned_at < scanStartTime` and verifies with `os.Lstat()`.
-//      Confirmed deleted files are purged from SQLite, keeping the index 100% accurate.
+// 2. Hash & Duplicate Cluster Precomputation:
+//    - Dedup groups are indexed via `duplicate_group_id` column.
+//    - Duplicate queries are single-query indexed lookups, completely eliminating N+1 overhead.
 //
-// 3. Time-Series Snapshots for Python Forecasting:
-//    - Every scan appends a point-in-time record to `scan_snapshots`.
-//    - Exposes historical snapshots sorted chronologically for Sahil's regression models.
+// 3. Fast Stale and Directory Browse Indexing:
+//    - Staleness queries use LIMIT/OFFSET server-side pagination with composite index filtering.
+//    - `parent_path` allows instantaneous lazy loading of directory hierarchies.
 // ============================================================================
 
 // DB wraps the SQL connection pool and lifecycle controls.
@@ -58,30 +55,32 @@ func Open(dbPath string, schemaPath string) (*DB, error) {
 	conn.SetMaxIdleConns(5)
 	conn.SetConnMaxLifetime(time.Hour)
 
-	dbInstance := &DB{
+	db := &DB{
 		Conn: conn,
 		path: dbPath,
 	}
 
-	if err := dbInstance.applyPragmas(); err != nil {
+	if err := db.applyPragmas(); err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("failed to apply pragmas: %w", err)
+		return nil, fmt.Errorf("failed to apply database pragmas: %w", err)
 	}
 
-	if err := dbInstance.applySchema(schemaPath); err != nil {
+	if err := db.applySchema(schemaPath); err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("failed to apply schema: %w", err)
+		return nil, fmt.Errorf("failed to apply database schema: %w", err)
 	}
 
-	return dbInstance, nil
+	db.backfillMissingColumns(context.Background())
+
+	return db, nil
 }
 
 func (d *DB) applyPragmas() error {
 	pragmas := []string{
 		"PRAGMA journal_mode = WAL;",
-		"PRAGMA synchronous = NORMAL;",
 		"PRAGMA busy_timeout = 5000;",
-		"PRAGMA cache_size = -64000;",
+		"PRAGMA synchronous = NORMAL;",
+		"PRAGMA cache_size = -64000;", // 64 MB page cache in memory
 		"PRAGMA foreign_keys = ON;",
 		"PRAGMA temp_store = MEMORY;",
 	}
@@ -105,6 +104,8 @@ func (d *DB) applySchema(schemaPath string) error {
 		inode INTEGER,
 		extension TEXT,
 		content_hash TEXT,
+		duplicate_group_id TEXT,
+		parent_path TEXT,
 		staleness_score REAL,
 		is_system INTEGER DEFAULT 0,
 		category TEXT DEFAULT 'user',
@@ -118,10 +119,14 @@ func (d *DB) applySchema(schemaPath string) error {
 	// Safe idempotent migrations for existing database files
 	_, _ = d.Conn.Exec("ALTER TABLE files ADD COLUMN is_system INTEGER DEFAULT 0;")
 	_, _ = d.Conn.Exec("ALTER TABLE files ADD COLUMN category TEXT DEFAULT 'user';")
+	_, _ = d.Conn.Exec("ALTER TABLE files ADD COLUMN duplicate_group_id TEXT;")
+	_, _ = d.Conn.Exec("ALTER TABLE files ADD COLUMN parent_path TEXT;")
 
 	indexSQL := `
 	CREATE INDEX IF NOT EXISTS idx_files_size ON files(size);
 	CREATE INDEX IF NOT EXISTS idx_files_hash ON files(content_hash);
+	CREATE INDEX IF NOT EXISTS idx_files_dup_group ON files(duplicate_group_id);
+	CREATE INDEX IF NOT EXISTS idx_files_parent ON files(parent_path);
 	CREATE INDEX IF NOT EXISTS idx_files_mtime ON files(mtime);
 	CREATE INDEX IF NOT EXISTS idx_files_staleness ON files(staleness_score);
 	CREATE INDEX IF NOT EXISTS idx_files_category ON files(category);
@@ -213,7 +218,7 @@ func (d *DB) BatchWriter(
 }
 
 // UpsertFileBatch performs incremental upserting.
-// Automatically invalidates content_hash and staleness_score when mtime/size changes.
+// Automatically invalidates content_hash, duplicate_group_id, and staleness_score when mtime/size changes.
 func (d *DB) UpsertFileBatch(ctx context.Context, files []models.FileMetadata) error {
 	if len(files) == 0 {
 		return nil
@@ -230,12 +235,16 @@ func (d *DB) UpsertFileBatch(ctx context.Context, files []models.FileMetadata) e
 
 	query := `
 	INSERT INTO files (
-		path, size, mtime, atime, inode, extension, content_hash, staleness_score, is_system, category, last_scanned_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		path, size, mtime, atime, inode, extension, content_hash, duplicate_group_id, parent_path, staleness_score, is_system, category, last_scanned_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(path) DO UPDATE SET
 		content_hash = CASE 
 			WHEN files.mtime != excluded.mtime OR files.size != excluded.size THEN NULL 
 			ELSE files.content_hash 
+		END,
+		duplicate_group_id = CASE
+			WHEN files.mtime != excluded.mtime OR files.size != excluded.size THEN NULL
+			ELSE files.duplicate_group_id
 		END,
 		staleness_score = CASE
 			WHEN files.mtime != excluded.mtime THEN NULL
@@ -246,6 +255,7 @@ func (d *DB) UpsertFileBatch(ctx context.Context, files []models.FileMetadata) e
 		atime = excluded.atime,
 		inode = excluded.inode,
 		extension = excluded.extension,
+		parent_path = excluded.parent_path,
 		is_system = excluded.is_system,
 		category = excluded.category,
 		last_scanned_at = excluded.last_scanned_at;
@@ -258,10 +268,19 @@ func (d *DB) UpsertFileBatch(ctx context.Context, files []models.FileMetadata) e
 	defer stmt.Close()
 
 	for _, f := range files {
-		var contentHash sql.NullString
+		var contentHash, dupGroupID sql.NullString
 		if f.ContentHash != "" {
 			contentHash.String = f.ContentHash
 			contentHash.Valid = true
+		}
+		if f.DuplicateGroupID != "" {
+			dupGroupID.String = f.DuplicateGroupID
+			dupGroupID.Valid = true
+		}
+
+		parentDir := f.ParentPath
+		if parentDir == "" {
+			parentDir = filepath.Dir(filepath.Clean(f.Path))
 		}
 
 		isSysInt := 0
@@ -281,6 +300,8 @@ func (d *DB) UpsertFileBatch(ctx context.Context, files []models.FileMetadata) e
 			f.Inode,
 			f.Extension,
 			contentHash,
+			dupGroupID,
+			parentDir,
 			f.StalenessScore,
 			isSysInt,
 			cat,
@@ -305,7 +326,6 @@ func (d *DB) PruneDeletedFiles(ctx context.Context, rootPath string, scanStartTi
 
 	cleanRoot := filepath.Clean(rootPath)
 
-	// Query candidate stale records indexed under this root that were NOT seen during the recent scan
 	query := `
 	SELECT id, path FROM files
 	WHERE (path = ? OR path LIKE ? || '/%') AND last_scanned_at < ?;
@@ -335,7 +355,6 @@ func (d *DB) PruneDeletedFiles(ctx context.Context, rootPath string, scanStartTi
 		return 0, nil
 	}
 
-	// Verify against filesystem using os.Lstat to ensure file was actually deleted/moved
 	var idsToDelete []int64
 	for _, c := range candidates {
 		_, err := os.Lstat(c.Path)
@@ -348,7 +367,6 @@ func (d *DB) PruneDeletedFiles(ctx context.Context, rootPath string, scanStartTi
 		return 0, nil
 	}
 
-	// Batch delete confirmed dead rows inside a single transaction
 	tx, err := d.Conn.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("failed to begin pruning transaction: %w", err)
@@ -380,7 +398,7 @@ func (d *DB) GetAllFiles(ctx context.Context) ([]models.FileMetadata, error) {
 	defer d.mu.RUnlock()
 
 	query := `
-	SELECT id, path, size, mtime, atime, inode, extension, COALESCE(content_hash, ''), COALESCE(staleness_score, 0.0), is_system, category, last_scanned_at
+	SELECT id, path, size, mtime, atime, inode, extension, COALESCE(content_hash, ''), COALESCE(duplicate_group_id, ''), COALESCE(parent_path, ''), COALESCE(staleness_score, 0.0), is_system, category, last_scanned_at
 	FROM files
 	ORDER BY id ASC;
 	`
@@ -395,7 +413,7 @@ func (d *DB) GetAllFiles(ctx context.Context) ([]models.FileMetadata, error) {
 	for rows.Next() {
 		var f models.FileMetadata
 		var mtimeSec, atimeSec, scannedSec int64
-		var contentHash, category string
+		var contentHash, dupGroupID, parentPath, category string
 		var isSysInt int
 
 		err := rows.Scan(
@@ -407,6 +425,8 @@ func (d *DB) GetAllFiles(ctx context.Context) ([]models.FileMetadata, error) {
 			&f.Inode,
 			&f.Extension,
 			&contentHash,
+			&dupGroupID,
+			&parentPath,
 			&f.StalenessScore,
 			&isSysInt,
 			&category,
@@ -420,6 +440,8 @@ func (d *DB) GetAllFiles(ctx context.Context) ([]models.FileMetadata, error) {
 		f.Atime = time.Unix(atimeSec, 0)
 		f.LastScannedAt = time.Unix(scannedSec, 0)
 		f.ContentHash = contentHash
+		f.DuplicateGroupID = dupGroupID
+		f.ParentPath = parentPath
 		f.IsSystem = isSysInt == 1
 		f.Category = models.FileCategory(category)
 
@@ -435,7 +457,7 @@ func (d *DB) GetCandidateSizeFiles(ctx context.Context) ([]models.FileMetadata, 
 	defer d.mu.RUnlock()
 
 	query := `
-	SELECT id, path, size, mtime, atime, inode, extension, COALESCE(content_hash, ''), COALESCE(staleness_score, 0.0), is_system, category, last_scanned_at
+	SELECT id, path, size, mtime, atime, inode, extension, COALESCE(content_hash, ''), COALESCE(duplicate_group_id, ''), COALESCE(parent_path, ''), COALESCE(staleness_score, 0.0), is_system, category, last_scanned_at
 	FROM files
 	WHERE size > 0 AND size IN (
 		SELECT size FROM files WHERE size > 0 GROUP BY size HAVING COUNT(*) > 1
@@ -453,7 +475,7 @@ func (d *DB) GetCandidateSizeFiles(ctx context.Context) ([]models.FileMetadata, 
 	for rows.Next() {
 		var f models.FileMetadata
 		var mtimeSec, atimeSec, scannedSec int64
-		var contentHash, category string
+		var contentHash, dupGroupID, parentPath, category string
 		var isSysInt int
 
 		err := rows.Scan(
@@ -465,6 +487,8 @@ func (d *DB) GetCandidateSizeFiles(ctx context.Context) ([]models.FileMetadata, 
 			&f.Inode,
 			&f.Extension,
 			&contentHash,
+			&dupGroupID,
+			&parentPath,
 			&f.StalenessScore,
 			&isSysInt,
 			&category,
@@ -478,6 +502,8 @@ func (d *DB) GetCandidateSizeFiles(ctx context.Context) ([]models.FileMetadata, 
 		f.Atime = time.Unix(atimeSec, 0)
 		f.LastScannedAt = time.Unix(scannedSec, 0)
 		f.ContentHash = contentHash
+		f.DuplicateGroupID = dupGroupID
+		f.ParentPath = parentPath
 		f.IsSystem = isSysInt == 1
 		f.Category = models.FileCategory(category)
 
@@ -517,6 +543,109 @@ func (d *DB) BatchUpdateContentHashes(ctx context.Context, updates []models.File
 	return tx.Commit()
 }
 
+// AssignDuplicateGroups updates duplicate_group_id for all duplicate clusters in SQLite using fast temporary table indexing.
+func (d *DB) AssignDuplicateGroups(ctx context.Context) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	fastAssignSQL := `
+	CREATE TEMP TABLE IF NOT EXISTS temp_active_dup_hashes AS
+	SELECT content_hash 
+	FROM files 
+	WHERE content_hash IS NOT NULL AND content_hash != '' 
+	GROUP BY content_hash, size 
+	HAVING COUNT(*) > 1;
+
+	CREATE INDEX IF NOT EXISTS temp_active_dup_idx ON temp_active_dup_hashes(content_hash);
+
+	UPDATE files SET duplicate_group_id = NULL
+	WHERE duplicate_group_id IS NOT NULL 
+	  AND duplicate_group_id NOT IN (SELECT content_hash FROM temp_active_dup_hashes);
+
+	UPDATE files SET duplicate_group_id = content_hash
+	WHERE content_hash IS NOT NULL AND content_hash != ''
+	  AND content_hash IN (SELECT content_hash FROM temp_active_dup_hashes);
+
+	DROP TABLE IF EXISTS temp_active_dup_hashes;
+	`
+	if _, err := d.Conn.ExecContext(ctx, fastAssignSQL); err != nil {
+		return fmt.Errorf("failed to assign duplicate group IDs: %w", err)
+	}
+
+	return nil
+}
+
+func (d *DB) backfillMissingColumns(ctx context.Context) {
+	var unassignedDups int
+	_ = d.Conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM files WHERE duplicate_group_id IS NULL AND content_hash IS NOT NULL AND content_hash != ''").Scan(&unassignedDups)
+	if unassignedDups > 0 {
+		_ = d.AssignDuplicateGroups(ctx)
+	}
+
+	var missingParents int
+	_ = d.Conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM files WHERE parent_path IS NULL OR parent_path = ''").Scan(&missingParents)
+	if missingParents > 0 {
+		_ = d.syncBackfillParentPaths(ctx)
+	}
+}
+
+func (d *DB) syncBackfillParentPaths(ctx context.Context) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	rows, err := d.Conn.QueryContext(ctx, "SELECT id, path FROM files WHERE parent_path IS NULL OR parent_path = ''")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type Item struct {
+		id   int64
+		path string
+	}
+	var items []Item
+	for rows.Next() {
+		var it Item
+		if err := rows.Scan(&it.id, &it.path); err == nil {
+			items = append(items, it)
+		}
+	}
+	rows.Close()
+
+	if len(items) == 0 {
+		return nil
+	}
+
+	chunkSize := 2000
+	for i := 0; i < len(items); i += chunkSize {
+		end := i + chunkSize
+		if end > len(items) {
+			end = len(items)
+		}
+		chunk := items[i:end]
+
+		tx, err := d.Conn.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+
+		stmt, err := tx.PrepareContext(ctx, "UPDATE files SET parent_path = ? WHERE id = ?")
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+
+		for _, it := range chunk {
+			parent := filepath.Dir(it.path)
+			_, _ = stmt.ExecContext(ctx, parent, it.id)
+		}
+		stmt.Close()
+		_ = tx.Commit()
+	}
+
+	return nil
+}
+
 // BatchUpdateStalenessScores updates staleness_score for multiple files inside a single atomic transaction.
 func (d *DB) BatchUpdateStalenessScores(ctx context.Context, updates []models.FileStalenessUpdate) error {
 	if len(updates) == 0 {
@@ -547,36 +676,54 @@ func (d *DB) BatchUpdateStalenessScores(ctx context.Context, updates []models.Fi
 	return tx.Commit()
 }
 
-// GetStaleFiles queries SQLite for files untouched for at least minDays, filtered and sorted by staleness_score.
-func (d *DB) GetStaleFiles(ctx context.Context, minDays int, minScore float64, limit int) ([]models.FileMetadata, error) {
+// GetStaleFilesPaginated queries SQLite for stale files with SQL LIMIT and OFFSET (Fix 5).
+func (d *DB) GetStaleFilesPaginated(ctx context.Context, minDays int, minScore float64, page int, limit int) (files []models.FileMetadata, totalFiles int, totalBytes int64, err error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
-	if limit <= 0 {
-		limit = 100
+	if page <= 0 {
+		page = 1
 	}
+	if limit <= 0 {
+		limit = 50
+	}
+	offset := (page - 1) * limit
 
 	cutoffSec := time.Now().AddDate(0, 0, -minDays).Unix()
 
+	// Query aggregate totals for stale files
+	countQuery := `
+	SELECT COUNT(*), COALESCE(SUM(size), 0)
+	FROM files
+	WHERE mtime <= ? AND staleness_score >= ?;
+	`
+	row := d.Conn.QueryRowContext(ctx, countQuery, cutoffSec, minScore)
+	if err := row.Scan(&totalFiles, &totalBytes); err != nil {
+		return nil, 0, 0, fmt.Errorf("failed to count stale files: %w", err)
+	}
+
+	if totalFiles == 0 {
+		return []models.FileMetadata{}, 0, 0, nil
+	}
+
 	query := `
-	SELECT id, path, size, mtime, atime, inode, extension, COALESCE(content_hash, ''), COALESCE(staleness_score, 0.0), is_system, category, last_scanned_at
+	SELECT id, path, size, mtime, atime, inode, extension, COALESCE(content_hash, ''), COALESCE(duplicate_group_id, ''), COALESCE(parent_path, ''), COALESCE(staleness_score, 0.0), is_system, category, last_scanned_at
 	FROM files
 	WHERE mtime <= ? AND staleness_score >= ?
 	ORDER BY staleness_score DESC, size DESC
-	LIMIT ?;
+	LIMIT ? OFFSET ?;
 	`
 
-	rows, err := d.Conn.QueryContext(ctx, query, cutoffSec, minScore, limit)
+	rows, err := d.Conn.QueryContext(ctx, query, cutoffSec, minScore, limit, offset)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query stale files: %w", err)
+		return nil, 0, 0, fmt.Errorf("failed to query stale files page: %w", err)
 	}
 	defer rows.Close()
 
-	var results []models.FileMetadata
 	for rows.Next() {
 		var f models.FileMetadata
 		var mtimeSec, atimeSec, scannedSec int64
-		var hash, category string
+		var hash, dupGroup, parentPath, category string
 		var isSysInt int
 
 		err := rows.Scan(
@@ -588,113 +735,310 @@ func (d *DB) GetStaleFiles(ctx context.Context, minDays int, minScore float64, l
 			&f.Inode,
 			&f.Extension,
 			&hash,
+			&dupGroup,
+			&parentPath,
 			&f.StalenessScore,
 			&isSysInt,
 			&category,
 			&scannedSec,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan stale file row: %w", err)
+			return nil, 0, 0, fmt.Errorf("failed to scan stale file row: %w", err)
 		}
 
 		f.Mtime = time.Unix(mtimeSec, 0)
 		f.Atime = time.Unix(atimeSec, 0)
 		f.LastScannedAt = time.Unix(scannedSec, 0)
 		f.ContentHash = hash
+		f.DuplicateGroupID = dupGroup
+		f.ParentPath = parentPath
 		f.IsSystem = isSysInt == 1
 		f.Category = models.FileCategory(category)
 
-		results = append(results, f)
+		files = append(files, f)
 	}
 
-	return results, rows.Err()
+	return files, totalFiles, totalBytes, rows.Err()
 }
 
-// GetDuplicateGroups queries SQLite for all duplicate clusters sharing the same content_hash and size.
-func (d *DB) GetDuplicateGroups(ctx context.Context) ([]models.DuplicateGroup, error) {
+// GetStaleFiles queries SQLite for files untouched for at least minDays, filtered and sorted by staleness_score.
+func (d *DB) GetStaleFiles(ctx context.Context, minDays int, minScore float64, limit int) ([]models.FileMetadata, error) {
+	files, _, _, err := d.GetStaleFilesPaginated(ctx, minDays, minScore, 1, limit)
+	return files, err
+}
+
+// GetDuplicateGroupsPaginated queries SQLite for duplicate clusters with pagination, avoiding N+1 queries (Fix 3 & Fix 5).
+func (d *DB) GetDuplicateGroupsPaginated(ctx context.Context, page int, limit int) (groups []models.DuplicateGroup, totalGroups int, totalDupFiles int, totalWastedBytes int64, err error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
-	groupQuery := `
-	SELECT content_hash, size, COUNT(*) as count, (COUNT(*) - 1) * size as wasted
-	FROM files
-	WHERE content_hash IS NOT NULL AND content_hash != ''
-	GROUP BY content_hash, size
-	HAVING COUNT(*) > 1
-	ORDER BY wasted DESC, size DESC;
-	`
+	if page <= 0 {
+		page = 1
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	offset := (page - 1) * limit
 
-	rows, err := d.Conn.QueryContext(ctx, groupQuery)
+	// Step 1: Query aggregate stats for all duplicate clusters
+	statsQuery := `
+	SELECT COUNT(*), COALESCE(SUM(wasted), 0), COALESCE(SUM(copies), 0) FROM (
+		SELECT (COUNT(*) - 1) * size as wasted, COUNT(*) as copies
+		FROM files
+		WHERE duplicate_group_id IS NOT NULL AND duplicate_group_id != ''
+		GROUP BY duplicate_group_id, size
+	);
+	`
+	row := d.Conn.QueryRowContext(ctx, statsQuery)
+	if err := row.Scan(&totalGroups, &totalWastedBytes, &totalDupFiles); err != nil {
+		return nil, 0, 0, 0, fmt.Errorf("failed to count duplicate groups: %w", err)
+	}
+
+	if totalGroups == 0 {
+		return []models.DuplicateGroup{}, 0, 0, 0, nil
+	}
+
+	// Step 2: Fetch the page of duplicate group identifiers (limit & offset)
+	pageQuery := `
+	SELECT duplicate_group_id, size, COUNT(*) as count, (COUNT(*) - 1) * size as wasted
+	FROM files
+	WHERE duplicate_group_id IS NOT NULL AND duplicate_group_id != ''
+	GROUP BY duplicate_group_id, size
+	ORDER BY wasted DESC, size DESC
+	LIMIT ? OFFSET ?;
+	`
+	rows, err := d.Conn.QueryContext(ctx, pageQuery, limit, offset)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query duplicate groups: %w", err)
+		return nil, 0, 0, 0, fmt.Errorf("failed to query page of duplicate groups: %w", err)
 	}
 	defer rows.Close()
 
-	var groups []models.DuplicateGroup
+	var groupIDs []string
+	groupMap := make(map[string]*models.DuplicateGroup)
+
 	for rows.Next() {
 		var g models.DuplicateGroup
 		if err := rows.Scan(&g.ContentHash, &g.FileSize, &g.DuplicateCount, &g.WastedBytes); err != nil {
-			return nil, fmt.Errorf("failed to scan duplicate group: %w", err)
+			return nil, 0, 0, 0, fmt.Errorf("failed to scan duplicate group row: %w", err)
 		}
-		groups = append(groups, g)
+		g.Files = make([]models.FileMetadata, 0, g.DuplicateCount)
+		groupIDs = append(groupIDs, g.ContentHash)
+		groupMap[g.ContentHash] = &g
+	}
+	rows.Close()
+
+	if len(groupIDs) == 0 {
+		return []models.DuplicateGroup{}, totalGroups, totalDupFiles, totalWastedBytes, nil
 	}
 
-	fileStmt, err := d.Conn.PrepareContext(ctx, `
-		SELECT id, path, size, mtime, atime, inode, extension, content_hash, staleness_score, is_system, category, last_scanned_at
-		FROM files
-		WHERE content_hash = ?
-		ORDER BY id ASC;
-	`)
+	// Step 3: Fetch all files belonging to these group IDs in a SINGLE indexed query (NO N+1)
+	placeholders := make([]string, len(groupIDs))
+	args := make([]interface{}, len(groupIDs))
+	for i, id := range groupIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	filesQuery := fmt.Sprintf(`
+	SELECT id, path, size, mtime, atime, inode, extension, COALESCE(content_hash, ''), COALESCE(duplicate_group_id, ''), COALESCE(parent_path, ''), COALESCE(staleness_score, 0.0), is_system, category, last_scanned_at
+	FROM files
+	WHERE duplicate_group_id IN (%s)
+	ORDER BY size DESC, duplicate_group_id, id ASC;
+	`, strings.Join(placeholders, ","))
+
+	fRows, err := d.Conn.QueryContext(ctx, filesQuery, args...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to prepare files-by-hash query: %w", err)
+		return nil, 0, 0, 0, fmt.Errorf("failed to query duplicate files batch: %w", err)
 	}
-	defer fileStmt.Close()
+	defer fRows.Close()
 
-	for i := range groups {
-		fRows, err := fileStmt.QueryContext(ctx, groups[i].ContentHash)
-		if err != nil {
-			return nil, fmt.Errorf("failed to query files for hash %q: %w", groups[i].ContentHash, err)
+	for fRows.Next() {
+		var f models.FileMetadata
+		var mtimeSec, atimeSec, scannedSec int64
+		var hash, dupGroup, parentPath, category string
+		var isSysInt int
+
+		if err := fRows.Scan(
+			&f.ID,
+			&f.Path,
+			&f.Size,
+			&mtimeSec,
+			&atimeSec,
+			&f.Inode,
+			&f.Extension,
+			&hash,
+			&dupGroup,
+			&parentPath,
+			&f.StalenessScore,
+			&isSysInt,
+			&category,
+			&scannedSec,
+		); err != nil {
+			return nil, 0, 0, 0, fmt.Errorf("failed to scan duplicate file row: %w", err)
 		}
 
-		var fileList []models.FileMetadata
-		for fRows.Next() {
-			var f models.FileMetadata
-			var mtimeSec, atimeSec, scannedSec int64
-			var hash, category string
-			var isSysInt int
+		f.Mtime = time.Unix(mtimeSec, 0)
+		f.Atime = time.Unix(atimeSec, 0)
+		f.LastScannedAt = time.Unix(scannedSec, 0)
+		f.ContentHash = hash
+		f.DuplicateGroupID = dupGroup
+		f.ParentPath = parentPath
+		f.IsSystem = isSysInt == 1
+		f.Category = models.FileCategory(category)
 
-			if err := fRows.Scan(
-				&f.ID,
-				&f.Path,
-				&f.Size,
-				&mtimeSec,
-				&atimeSec,
-				&f.Inode,
-				&f.Extension,
-				&hash,
-				&f.StalenessScore,
-				&isSysInt,
-				&category,
-				&scannedSec,
-			); err != nil {
-				fRows.Close()
-				return nil, fmt.Errorf("failed to scan file row: %w", err)
+		if g, exists := groupMap[dupGroup]; exists {
+			g.Files = append(g.Files, f)
+		}
+	}
+
+	// Reconstruct ordered slice matching groupIDs order
+	groups = make([]models.DuplicateGroup, 0, len(groupIDs))
+	for _, id := range groupIDs {
+		if g, ok := groupMap[id]; ok {
+			groups = append(groups, *g)
+		}
+	}
+
+	return groups, totalGroups, totalDupFiles, totalWastedBytes, nil
+}
+
+// GetDuplicateGroups queries SQLite for all duplicate clusters without N+1 query loop.
+func (d *DB) GetDuplicateGroups(ctx context.Context) ([]models.DuplicateGroup, error) {
+	groups, _, _, _, err := d.GetDuplicateGroupsPaginated(ctx, 1, 100000)
+	return groups, err
+}
+
+// BrowseDirectory lists direct child files and aggregated subdirectories of a directory (Fix 6).
+func (d *DB) BrowseDirectory(ctx context.Context, dirPath string) (*models.DirectoryBrowseResponse, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	cleanDir := filepath.Clean(dirPath)
+	parentDir := filepath.Dir(cleanDir)
+	if cleanDir == parentDir {
+		parentDir = ""
+	}
+
+	resp := &models.DirectoryBrowseResponse{
+		CurrentPath: cleanDir,
+		ParentPath:  parentDir,
+		Items:       []models.DirectoryBrowseItem{},
+	}
+
+	// 1. Query direct child files
+	filesQuery := `
+	SELECT id, path, size, mtime, COALESCE(content_hash, ''), COALESCE(duplicate_group_id, ''), COALESCE(staleness_score, 0.0), is_system, category
+	FROM files
+	WHERE parent_path = ?
+	ORDER BY size DESC;
+	`
+	fRows, err := d.Conn.QueryContext(ctx, filesQuery, cleanDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to browse files in %q: %w", cleanDir, err)
+	}
+	defer fRows.Close()
+
+	for fRows.Next() {
+		var id int64
+		var path, hash, dupGroup, category string
+		var size, mtimeSec int64
+		var score float64
+		var isSysInt int
+
+		if err := fRows.Scan(&id, &path, &size, &mtimeSec, &hash, &dupGroup, &score, &isSysInt, &category); err != nil {
+			return nil, fmt.Errorf("failed to scan browse file: %w", err)
+		}
+
+		resp.Items = append(resp.Items, models.DirectoryBrowseItem{
+			Path:           path,
+			Name:           filepath.Base(path),
+			IsDir:          false,
+			Size:           size,
+			Mtime:          time.Unix(mtimeSec, 0),
+			Category:       models.FileCategory(category),
+			IsSystem:       isSysInt == 1,
+			StalenessScore: score,
+			IsDuplicate:    dupGroup != "",
+		})
+		resp.TotalBytes += size
+	}
+	fRows.Close()
+
+	// 2. Query direct subdirectories under cleanDir
+	prefix := cleanDir
+	if !strings.HasSuffix(prefix, "/") {
+		prefix += "/"
+	}
+
+	dirsQuery := `
+	SELECT parent_path, COUNT(*), COALESCE(SUM(size), 0), MAX(mtime)
+	FROM files
+	WHERE parent_path LIKE ? || '%'
+	GROUP BY parent_path;
+	`
+	dRows, err := d.Conn.QueryContext(ctx, dirsQuery, prefix)
+	if err != nil {
+		return nil, fmt.Errorf("failed to browse subdirectories in %q: %w", cleanDir, err)
+	}
+	defer dRows.Close()
+
+	type SubDirAgg struct {
+		Name      string
+		FullPath  string
+		Size      int64
+		ItemCount int64
+		MaxMtime  int64
+	}
+	subDirMap := make(map[string]*SubDirAgg)
+
+	for dRows.Next() {
+		var subParent string
+		var count, bytes, maxMtime int64
+		if err := dRows.Scan(&subParent, &count, &bytes, &maxMtime); err != nil {
+			return nil, fmt.Errorf("failed to scan sub dir aggregation: %w", err)
+		}
+
+		rel := strings.TrimPrefix(subParent, prefix)
+		parts := strings.Split(rel, "/")
+		if len(parts) > 0 && parts[0] != "" {
+			dirName := parts[0]
+			fullSubPath := filepath.Join(cleanDir, dirName)
+			if agg, exists := subDirMap[dirName]; exists {
+				agg.Size += bytes
+				agg.ItemCount += count
+				if maxMtime > agg.MaxMtime {
+					agg.MaxMtime = maxMtime
+				}
+			} else {
+				subDirMap[dirName] = &SubDirAgg{
+					Name:      dirName,
+					FullPath:  fullSubPath,
+					Size:      bytes,
+					ItemCount: count,
+					MaxMtime:  maxMtime,
+				}
 			}
-
-			f.Mtime = time.Unix(mtimeSec, 0)
-			f.Atime = time.Unix(atimeSec, 0)
-			f.LastScannedAt = time.Unix(scannedSec, 0)
-			f.ContentHash = hash
-			f.IsSystem = isSysInt == 1
-			f.Category = models.FileCategory(category)
-
-			fileList = append(fileList, f)
 		}
-		fRows.Close()
-		groups[i].Files = fileList
+	}
+	dRows.Close()
+
+	var dirItems []models.DirectoryBrowseItem
+	for _, agg := range subDirMap {
+		dirItems = append(dirItems, models.DirectoryBrowseItem{
+			Path:      agg.FullPath,
+			Name:      agg.Name,
+			IsDir:     true,
+			Size:      agg.Size,
+			ItemCount: agg.ItemCount,
+			Mtime:     time.Unix(agg.MaxMtime, 0),
+		})
+		resp.TotalBytes += agg.Size
 	}
 
-	return groups, nil
+	resp.Items = append(dirItems, resp.Items...)
+	resp.TotalItems = len(resp.Items)
+
+	return resp, nil
 }
 
 // RecordSnapshot writes a point-in-time summary to scan_snapshots.
@@ -843,17 +1187,25 @@ func (d *DB) GetStorageStats(ctx context.Context) (*models.StorageStats, error) 
 		return nil, fmt.Errorf("failed to query file totals: %w", err)
 	}
 
-	// Total duplicate groups & wasted bytes
+	// Total duplicate groups, copies & wasted bytes using precomputed duplicate_group_id index
 	dupRow := d.Conn.QueryRowContext(ctx, `
-		SELECT COUNT(*), COALESCE(SUM(wasted), 0) FROM (
-			SELECT (COUNT(*) - 1) * size as wasted
+		SELECT COUNT(*), COALESCE(SUM(wasted), 0), COALESCE(SUM(copies), 0) FROM (
+			SELECT (COUNT(*) - 1) * size as wasted, COUNT(*) as copies
 			FROM files
-			WHERE content_hash IS NOT NULL AND content_hash != ''
-			GROUP BY content_hash, size
-			HAVING COUNT(*) > 1
+			WHERE duplicate_group_id IS NOT NULL AND duplicate_group_id != ''
+			GROUP BY duplicate_group_id, size
 		);
 	`)
-	_ = dupRow.Scan(&stats.TotalDuplicates, &stats.TotalWastedBytes)
+	_ = dupRow.Scan(&stats.TotalDuplicates, &stats.TotalWastedBytes, &stats.TotalDuplicateFiles)
+
+	// Total inactive stale files (30+ days threshold)
+	cutoff30 := time.Now().AddDate(0, 0, -30).Unix()
+	staleRow := d.Conn.QueryRowContext(ctx, `
+		SELECT COUNT(*), COALESCE(SUM(size), 0)
+		FROM files
+		WHERE mtime <= ? AND staleness_score >= 0.01;
+	`, cutoff30)
+	_ = staleRow.Scan(&stats.TotalStaleFiles, &stats.TotalStaleBytes)
 
 	// Total snapshots
 	snapRow := d.Conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM scan_snapshots")
@@ -896,7 +1248,7 @@ func (d *DB) GetFileByID(ctx context.Context, id int64) (*models.FileMetadata, e
 
 func (d *DB) getFileByIDLocked(ctx context.Context, id int64) (*models.FileMetadata, error) {
 	query := `
-	SELECT id, path, size, mtime, atime, inode, extension, COALESCE(content_hash, ''), COALESCE(staleness_score, 0.0), is_system, category, last_scanned_at
+	SELECT id, path, size, mtime, atime, inode, extension, COALESCE(content_hash, ''), COALESCE(duplicate_group_id, ''), COALESCE(parent_path, ''), COALESCE(staleness_score, 0.0), is_system, category, last_scanned_at
 	FROM files
 	WHERE id = ?;
 	`
@@ -904,7 +1256,7 @@ func (d *DB) getFileByIDLocked(ctx context.Context, id int64) (*models.FileMetad
 
 	var f models.FileMetadata
 	var mtimeSec, atimeSec, scannedSec int64
-	var hash, category string
+	var hash, dupGroup, parentPath, category string
 	var isSysInt int
 
 	err := row.Scan(
@@ -916,6 +1268,8 @@ func (d *DB) getFileByIDLocked(ctx context.Context, id int64) (*models.FileMetad
 		&f.Inode,
 		&f.Extension,
 		&hash,
+		&dupGroup,
+		&parentPath,
 		&f.StalenessScore,
 		&isSysInt,
 		&category,
@@ -932,6 +1286,8 @@ func (d *DB) getFileByIDLocked(ctx context.Context, id int64) (*models.FileMetad
 	f.Atime = time.Unix(atimeSec, 0)
 	f.LastScannedAt = time.Unix(scannedSec, 0)
 	f.ContentHash = hash
+	f.DuplicateGroupID = dupGroup
+	f.ParentPath = parentPath
 	f.IsSystem = isSysInt == 1
 	f.Category = models.FileCategory(category)
 
@@ -1050,6 +1406,3 @@ func (d *DB) GetActionLogs(ctx context.Context, limit int) ([]models.ActionLog, 
 	}
 	return logs, rows.Err()
 }
-
-
-

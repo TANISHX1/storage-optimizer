@@ -164,28 +164,40 @@ func (e *Engine) ComputeAndPersistScores(ctx context.Context) (int, error) {
 	return int(atomic.LoadInt64(&evaluated)), batchErr
 }
 
-// FindStaleFiles calculates scores and returns candidates untouched for minDays.
+// FindStaleFiles queries precomputed staleness scores for candidates untouched for minDays (Pure Read).
 func (e *Engine) FindStaleFiles(ctx context.Context, minDays int, minScore float64, limit int) (*models.StaleReport, error) {
+	return e.FindStaleFilesPaginated(ctx, minDays, minScore, 1, limit)
+}
+
+// FindStaleFilesPaginated queries SQLite for stale files using LIMIT/OFFSET (Pure Read).
+func (e *Engine) FindStaleFilesPaginated(ctx context.Context, minDays int, minScore float64, page int, limit int) (*models.StaleReport, error) {
 	startTime := time.Now()
 
-	if _, err := e.ComputeAndPersistScores(ctx); err != nil {
-		return nil, fmt.Errorf("failed to update staleness scores: %w", err)
+	if page <= 0 {
+		page = 1
+	}
+	if limit <= 0 {
+		limit = 50
 	}
 
-	files, err := e.db.GetStaleFiles(ctx, minDays, minScore, limit)
+	files, totalFiles, totalBytes, err := e.db.GetStaleFilesPaginated(ctx, minDays, minScore, page, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query stale files: %w", err)
 	}
 
-	var totalBytes int64
-	for _, f := range files {
-		totalBytes += f.Size
+	totalPages := 0
+	if totalFiles > 0 {
+		totalPages = int(math.Ceil(float64(totalFiles) / float64(limit)))
 	}
 
 	return &models.StaleReport{
 		ThresholdDays: minDays,
-		TotalFiles:    len(files),
+		MinScore:      minScore,
+		TotalFiles:    totalFiles,
 		TotalBytes:    totalBytes,
+		Page:          page,
+		Limit:         limit,
+		TotalPages:    totalPages,
 		Files:         files,
 		Duration:      time.Since(startTime),
 	}, nil

@@ -12,7 +12,7 @@
 </head>
 <body>
   <div class="window-frame">
-    <!-- Sidebar / macOS Source List -->
+    <!-- Sidebar / macOS Modern Source List (Refined Design) -->
     <aside class="sidebar">
       <!-- Traffic Light Window Controls -->
       <div class="window-controls">
@@ -21,24 +21,41 @@
         <span class="control-dot maximize" title="Zoom"></span>
       </div>
 
-      <!-- App Brand / Header -->
+      <!-- App Brand / Workspace Dropdown Header -->
       <div class="brand">
-        <div class="brand-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
-          </svg>
+        <div class="brand-left">
+          <div class="brand-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="6 3 20 12 6 21 6 3"/>
+            </svg>
+          </div>
+          <div class="brand-text">
+            <h2>StorageOpt</h2>
+            <span class="brand-chevron">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+            </span>
+          </div>
         </div>
-        <div class="brand-text">
-          <h2>StorageOpt</h2>
-          <span class="brand-edition">Linux Pro</span>
-        </div>
+        <button class="sidebar-toggle-btn" title="Toggle Layout">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+        </button>
+      </div>
+
+      <!-- Quick Search Bar -->
+      <div class="sidebar-search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" placeholder="Search..." id="sidebar-quick-search" oninput="app.filterTabs(this.value)">
+        <span class="search-kbd">⌘K</span>
       </div>
 
       <!-- Navigation Categories -->
       <nav class="nav-menu">
-        <div class="nav-section-label">Overview</div>
+        <div class="nav-section-label">
+          <span>Overview</span>
+          <svg class="section-chevron" viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
         <button class="nav-item active" data-tab="dashboard" id="nav-dashboard">
-          <div class="nav-icon-box blue">
+          <div class="nav-icon-box">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <rect x="3" y="3" width="7" height="7" rx="1.5"/>
               <rect x="14" y="3" width="7" height="7" rx="1.5"/>
@@ -49,9 +66,12 @@
           <span>Dashboard</span>
         </button>
 
-        <div class="nav-section-label">Optimization</div>
+        <div class="nav-section-label">
+          <span>Optimization</span>
+          <svg class="section-chevron" viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
         <button class="nav-item" data-tab="scanner" id="nav-scanner">
-          <div class="nav-icon-box cyan">
+          <div class="nav-icon-box">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="11" cy="11" r="8"/>
               <line x1="21" y1="21" x2="16.65" y2="16.65"/>
@@ -61,7 +81,7 @@
         </button>
 
         <button class="nav-item" data-tab="duplicates" id="nav-duplicates">
-          <div class="nav-icon-box yellow">
+          <div class="nav-icon-box">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
@@ -72,7 +92,7 @@
         </button>
 
         <button class="nav-item" data-tab="stale" id="nav-stale">
-          <div class="nav-icon-box amber">
+          <div class="nav-icon-box">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="10"/>
               <polyline points="12 6 12 12 16 14"/>
@@ -82,9 +102,21 @@
           <span class="nav-badge warning" id="badge-stale">0</span>
         </button>
 
-        <div class="nav-section-label">Intelligence</div>
+        <button class="nav-item" data-tab="browse" id="nav-browse">
+          <div class="nav-icon-box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+          </div>
+          <span>Browse Tree</span>
+        </button>
+
+        <div class="nav-section-label">
+          <span>Intelligence</span>
+          <svg class="section-chevron" viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
         <button class="nav-item" data-tab="forecasting" id="nav-forecasting">
-          <div class="nav-icon-box mint">
+          <div class="nav-icon-box">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
               <polyline points="17 6 23 6 23 12"/>
@@ -93,9 +125,12 @@
           <span>AI Forecast (ML)</span>
         </button>
 
-        <div class="nav-section-label">Safety & Logs</div>
+        <div class="nav-section-label">
+          <span>Safety & Logs</span>
+          <svg class="section-chevron" viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
         <button class="nav-item" data-tab="audit" id="nav-audit">
-          <div class="nav-icon-box gray">
+          <div class="nav-icon-box">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="3 6 5 6 21 6"/>
               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
@@ -108,6 +143,11 @@
 
       <!-- Sidebar Footer Status -->
       <div class="sidebar-footer">
+        <div class="sidebar-bottom-links">
+          <a href="#" onclick="app.switchTab('audit'); return false;">Audit Logs</a>
+          <span class="dot-sep">•</span>
+          <a href="#" onclick="app.switchTab('forecasting'); return false;">Analytics</a>
+        </div>
         <div class="api-status-card">
           <div class="status-indicator-dot online" id="api-status-dot"></div>
           <div class="status-meta">
@@ -120,7 +160,7 @@
 
     <!-- Main Content Area -->
     <main class="main-content">
-      <!-- Unified macOS Toolbar -->
+      <!-- Unified Modern Toolbar Header -->
       <header class="toolbar">
         <div class="toolbar-title-area">
           <h1 id="page-title">System Dashboard</h1>
@@ -137,9 +177,9 @@
             <span>Refresh</span>
           </button>
           <button class="btn btn-primary" id="btn-quick-scan">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10"/>
-              <polyline points="12 8 12 12 14 14"/>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19"/>
+              <line x1="5" y1="12" x2="19" y2="12"/>
             </svg>
             <span>New Scan</span>
           </button>
@@ -414,7 +454,7 @@
         <!-- TAB 3: DUPLICATES EXPLORER -->
         <!-- ============================================================ -->
         <section class="tab-pane" id="tab-duplicates">
-          <div class="pane-action-bar frosted-card">
+          <div class="pane-action-bar-seamless">
             <div class="action-bar-left">
               <div class="panel-title-group">
                 <h3>Duplicate File Clusters</h3>
@@ -444,13 +484,23 @@
               <p>Your indexed storage is clean and free of redundant identical copies.</p>
             </div>
           </div>
+
+          <!-- Duplicates Pagination Bar (Fix 5) -->
+          <div class="pagination-bar" id="dup-pagination-bar" style="display: none;">
+            <span class="pagination-info" id="dup-pagination-info">Showing page 1 of 1</span>
+            <div class="pagination-controls">
+              <button class="pagination-btn" id="btn-dup-prev" onclick="app.prevDupPage()">‹ Previous</button>
+              <span class="page-indicator" id="dup-page-indicator">1 / 1</span>
+              <button class="pagination-btn" id="btn-dup-next" onclick="app.nextDupPage()">Next ›</button>
+            </div>
+          </div>
         </section>
 
         <!-- ============================================================ -->
         <!-- TAB 4: STALE & JUNK FILES -->
         <!-- ============================================================ -->
         <section class="tab-pane" id="tab-stale">
-          <div class="pane-action-bar frosted-card">
+          <div class="pane-action-bar-seamless">
             <div class="action-bar-left">
               <div class="segmented-control-wrapper">
                 <span class="control-label">Untouched for:</span>
@@ -491,6 +541,52 @@
                 </thead>
                 <tbody id="stale-table-body">
                   <tr><td colspan="6" class="empty-cell">Loading stale files...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Stale Pagination Bar (Fix 5) -->
+          <div class="pagination-bar" id="stale-pagination-bar" style="display: none;">
+            <span class="pagination-info" id="stale-pagination-info">Showing page 1 of 1</span>
+            <div class="pagination-controls">
+              <button class="pagination-btn" id="btn-stale-prev" onclick="app.prevStalePage()">‹ Previous</button>
+              <span class="page-indicator" id="stale-page-indicator">1 / 1</span>
+              <button class="pagination-btn" id="btn-stale-next" onclick="app.nextStalePage()">Next ›</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============================================================ -->
+        <!-- TAB 4.5: DIRECTORY BROWSE (FIX 6) -->
+        <!-- ============================================================ -->
+        <section class="tab-pane" id="tab-browse">
+          <div class="browse-action-bar-seamless">
+            <div class="browse-breadcrumb-wrap" id="browse-breadcrumbs">
+              <span class="breadcrumb-crumb" onclick="app.browsePath('/')">root</span>
+            </div>
+            <div class="browse-action-buttons">
+              <button class="btn btn-secondary btn-sm" id="btn-browse-up" onclick="app.browseUpDirectory()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg>
+                <span>Up Directory</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="frosted-card panel-card margin-top">
+            <div class="table-container">
+              <table class="mac-table" id="browse-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th width="120">Type</th>
+                    <th width="120">Size</th>
+                    <th width="140">Category</th>
+                    <th width="160">Modified</th>
+                  </tr>
+                </thead>
+                <tbody id="browse-table-body">
+                  <tr><td colspan="5" class="empty-cell">Select or index a directory to browse hierarchy.</td></tr>
                 </tbody>
               </table>
             </div>

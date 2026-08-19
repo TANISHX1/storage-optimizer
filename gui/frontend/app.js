@@ -18,6 +18,24 @@ class StorageApp {
     this.staleFiles = [];
     this.auditLogs = [];
 
+    // Duplicates Pagination (Fix 5)
+    this.dupPage = 1;
+    this.dupLimit = 25;
+    this.dupTotalPages = 1;
+    this.dupTotalGroups = 0;
+
+    // Stale Pagination (Fix 5)
+    this.staleDays = 30;
+    this.stalePage = 1;
+    this.staleLimit = 50;
+    this.staleTotalPages = 1;
+    this.staleTotalFiles = 0;
+
+    // Directory Browser State (Fix 6)
+    this.browseCurrentPath = '';
+    this.browseParentPath = '';
+    this.browseData = null;
+
     // Modal State
     this.pendingAction = null; // { mode: 'trash'|'permanent', ids: [], files: [] }
 
@@ -67,7 +85,7 @@ class StorageApp {
 
   setupEventListeners() {
     document.getElementById('btn-refresh-all')?.addEventListener('click', () => {
-      this.showToast('Refreshing all storage metrics...', 'info');
+      this.showToast('Refreshing storage metrics...', 'info');
       this.loadAllData();
     });
 
@@ -75,10 +93,30 @@ class StorageApp {
       this.switchTab('scanner');
     });
 
-    // Close modal on Escape
+    // Close modal on Escape & Cmd+K search focus
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && this.pendingAction) {
         this.closeModal();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        const searchInput = document.getElementById('sidebar-quick-search');
+        if (searchInput) {
+          searchInput.focus();
+          searchInput.select();
+        }
+      }
+    });
+  }
+
+  filterTabs(query) {
+    const q = (query || '').toLowerCase().trim();
+    document.querySelectorAll('.nav-item').forEach(item => {
+      const text = item.innerText.toLowerCase();
+      if (!q || text.includes(q)) {
+        item.style.display = 'flex';
+      } else {
+        item.style.display = 'none';
       }
     });
   }
@@ -102,6 +140,7 @@ class StorageApp {
       scanner: { title: 'Filesystem Walker & Indexer', sub: 'Concurrent POSIX metadata indexing and time-series snapshot tracking' },
       duplicates: { title: 'Duplicate File Hunter', sub: 'Two-pass cryptographic deduplication and space reclamation' },
       stale: { title: 'Stale & Inactive Junk Files', sub: 'Mathematical staleness ranking and system log/cache identification' },
+      browse: { title: 'Directory Hierarchy Browser', sub: 'Lazy tree navigation with direct child aggregation and category inspection' },
       forecasting: { title: 'AI Storage Forecasting (ML Layer)', sub: 'Time-series growth trajectory, days-until-full estimation, and smart recommendations' },
       audit: { title: 'FreeDesktop XDG Trash & Audit Log', sub: 'Immutable audit trail of past file cleanups and instant file restoration' }
     };
@@ -114,6 +153,9 @@ class StorageApp {
 
     if (tabId === 'forecasting') {
       this.renderForecastView();
+    } else if (tabId === 'browse' && !this.browseData) {
+      const scanInput = document.getElementById('scan-path-input')?.value || '/home/blazex/Documents';
+      this.loadDirectoryBrowse(scanInput);
     }
   }
 
@@ -210,32 +252,81 @@ class StorageApp {
     }
   }
 
-  async loadDuplicates() {
+  async loadDuplicates(page = 1) {
     try {
-      const data = await this.apiRequest('/files/duplicates');
+      this.dupPage = page;
+      const data = await this.apiRequest(`/files/duplicates?page=${page}&limit=${this.dupLimit}`);
       this.duplicates = data.groups || [];
+      this.dupTotalPages = data.total_pages || 1;
+      this.dupTotalGroups = data.total_groups || 0;
+
       const badge = document.getElementById('badge-duplicates');
-      if (badge) badge.innerText = this.duplicates.length;
+      if (badge) badge.innerText = this.dupTotalGroups;
+
       const summaryBadge = document.getElementById('dup-summary-badge');
-      if (summaryBadge) summaryBadge.innerText = `${this.duplicates.length} Groups (${this.formatBytes(data.total_wasted_bytes || 0)} wasted)`;
+      if (summaryBadge) summaryBadge.innerText = `${this.dupTotalGroups} Groups (${this.formatBytes(data.total_wasted_bytes || 0)} wasted)`;
+
       this.renderDuplicatesList();
+      this.renderDupPagination(data);
     } catch (err) {
       console.error('Failed to load duplicates:', err);
     }
   }
 
-  async loadStaleFiles(days = 30) {
+  prevDupPage() {
+    if (this.dupPage > 1) {
+      this.loadDuplicates(this.dupPage - 1);
+    }
+  }
+
+  nextDupPage() {
+    if (this.dupPage < this.dupTotalPages) {
+      this.loadDuplicates(this.dupPage + 1);
+    }
+  }
+
+  renderDupPagination(data) {
+    const bar = document.getElementById('dup-pagination-bar');
+    if (!bar) return;
+
+    if (this.dupTotalGroups === 0) {
+      bar.style.display = 'none';
+      return;
+    }
+
+    bar.style.display = 'flex';
+    const info = document.getElementById('dup-pagination-info');
+    if (info) info.innerText = `Showing page ${this.dupPage} of ${this.dupTotalPages} (${this.dupTotalGroups} groups, ${this.formatBytes(data.total_wasted_bytes || 0)} wasted)`;
+
+    const ind = document.getElementById('dup-page-indicator');
+    if (ind) ind.innerText = `${this.dupPage} / ${this.dupTotalPages}`;
+
+    const prevBtn = document.getElementById('btn-dup-prev');
+    const nextBtn = document.getElementById('btn-dup-next');
+    if (prevBtn) prevBtn.disabled = this.dupPage <= 1;
+    if (nextBtn) nextBtn.disabled = this.dupPage >= this.dupTotalPages;
+  }
+
+  async loadStaleFiles(days = 30, page = 1) {
     try {
+      this.staleDays = days;
+      this.stalePage = page;
+
       // Update segmented control buttons
       document.querySelectorAll('#stale-segmented-control .segment-btn').forEach(b => {
         b.classList.toggle('active', parseInt(b.getAttribute('data-days')) === days);
       });
 
-      const data = await this.apiRequest(`/files/stale?days=${days}&min_score=0.01&limit=100`);
+      const data = await this.apiRequest(`/files/stale?days=${days}&min_score=0.01&page=${page}&limit=${this.staleLimit}`);
       this.staleFiles = data.files || [];
+      this.staleTotalPages = data.total_pages || 1;
+      this.staleTotalFiles = data.total_files || 0;
+
       const badge = document.getElementById('badge-stale');
-      if (badge) badge.innerText = this.staleFiles.length;
+      if (badge) badge.innerText = this.staleTotalFiles;
+
       this.renderStaleTable();
+      this.renderStalePagination(data);
       if (this.stats) {
         this.renderDashboardStats(this.stats);
         this.renderStorageHeroBar(this.stats);
@@ -243,6 +334,138 @@ class StorageApp {
     } catch (err) {
       console.error('Failed to load stale files:', err);
     }
+  }
+
+  prevStalePage() {
+    if (this.stalePage > 1) {
+      this.loadStaleFiles(this.staleDays, this.stalePage - 1);
+    }
+  }
+
+  nextStalePage() {
+    if (this.stalePage < this.staleTotalPages) {
+      this.loadStaleFiles(this.staleDays, this.stalePage + 1);
+    }
+  }
+
+  renderStalePagination(data) {
+    const bar = document.getElementById('stale-pagination-bar');
+    if (!bar) return;
+
+    if (this.staleTotalFiles === 0) {
+      bar.style.display = 'none';
+      return;
+    }
+
+    bar.style.display = 'flex';
+    const info = document.getElementById('stale-pagination-info');
+    if (info) info.innerText = `Showing page ${this.stalePage} of ${this.staleTotalPages} (${this.staleTotalFiles} stale files, ${this.formatBytes(data.total_bytes || 0)})`;
+
+    const ind = document.getElementById('stale-page-indicator');
+    if (ind) ind.innerText = `${this.stalePage} / ${this.staleTotalPages}`;
+
+    const prevBtn = document.getElementById('btn-stale-prev');
+    const nextBtn = document.getElementById('btn-stale-next');
+    if (prevBtn) prevBtn.disabled = this.stalePage <= 1;
+    if (nextBtn) nextBtn.disabled = this.stalePage >= this.staleTotalPages;
+  }
+
+  // --- Directory Hierarchy Browser (Fix 6) ---
+
+  async loadDirectoryBrowse(path = '/') {
+    try {
+      const data = await this.apiRequest(`/files/browse?path=${encodeURIComponent(path)}`);
+      this.browseData = data;
+      this.browseCurrentPath = data.current_path || path;
+      this.browseParentPath = data.parent_path || '';
+      this.renderBrowseView();
+    } catch (err) {
+      console.error('Failed to load directory browse:', err);
+      this.showToast(`Directory lookup error: ${err.message}`, 'error');
+    }
+  }
+
+  browsePath(path) {
+    this.loadDirectoryBrowse(path);
+  }
+
+  browseUpDirectory() {
+    if (this.browseParentPath && this.browseParentPath !== this.browseCurrentPath) {
+      this.browsePath(this.browseParentPath);
+    }
+  }
+
+  renderBrowseView() {
+    if (!this.browseData) return;
+
+    // Breadcrumbs
+    const crumbsContainer = document.getElementById('browse-breadcrumbs');
+    if (crumbsContainer) {
+      const parts = this.browseCurrentPath.split('/').filter(Boolean);
+      let accumulated = '';
+      let crumbsHtml = `<span class="breadcrumb-crumb" onclick="app.browsePath('/')">root</span>`;
+
+      parts.forEach((p) => {
+        accumulated += '/' + p;
+        const clickPath = accumulated;
+        crumbsHtml += ` <span style="color: var(--text-tertiary);">/</span> <span class="breadcrumb-crumb" onclick="app.browsePath('${clickPath}')">${p}</span>`;
+      });
+      crumbsContainer.innerHTML = crumbsHtml;
+    }
+
+    const upBtn = document.getElementById('btn-browse-up');
+    if (upBtn) {
+      upBtn.disabled = !this.browseParentPath || this.browseCurrentPath === '/' || this.browseParentPath === this.browseCurrentPath;
+    }
+
+    // Table
+    const tbody = document.getElementById('browse-table-body');
+    if (!tbody) return;
+
+    const items = this.browseData.items || [];
+    const dirs = items.filter(it => it.is_dir);
+    const files = items.filter(it => !it.is_dir);
+
+    if (dirs.length === 0 && files.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty-cell">Directory is empty.</td></tr>';
+      return;
+    }
+
+    let rowsHtml = '';
+
+    // Subdirectories first
+    dirs.forEach(d => {
+      rowsHtml += `
+        <tr class="dir-item-row" onclick="app.browsePath('${d.path.replace(/'/g, "\\'")}')">
+          <td>
+            <span class="dir-icon">📁</span>
+            <strong>${d.name}</strong>
+          </td>
+          <td><span class="badge badge-blue">Directory</span></td>
+          <td class="size-cell">${this.formatBytes(d.size)}</td>
+          <td><span style="color: var(--text-tertiary);">${(d.item_count || 0).toLocaleString('en-US')} files</span></td>
+          <td style="color: var(--text-secondary); font-size: 0.76rem;">${this.formatTimestamp(d.mtime)}</td>
+        </tr>
+      `;
+    });
+
+    // Direct files
+    files.forEach(f => {
+      rowsHtml += `
+        <tr>
+          <td>
+            <span class="dir-icon">📄</span>
+            <span>${f.name}</span>
+          </td>
+          <td><span class="badge badge-secondary">File</span></td>
+          <td class="size-cell">${this.formatBytes(f.size)}</td>
+          <td>${this.renderCategoryBadge(f.category)}</td>
+          <td style="color: var(--text-secondary); font-size: 0.76rem;">${this.formatTimestamp(f.mtime)}</td>
+        </tr>
+      `;
+    });
+
+    tbody.innerHTML = rowsHtml;
   }
 
   async loadSnapshots() {
@@ -281,11 +504,14 @@ class StorageApp {
     document.getElementById('stat-total-files').innerText = `${(stats.total_files || 0).toLocaleString('en-US')} files indexed`;
 
     document.getElementById('stat-duplicate-bytes').innerText = this.formatBytes(stats.total_wasted_bytes);
-    document.getElementById('stat-duplicate-count').innerText = `${(stats.total_duplicates || 0).toLocaleString('en-US')} redundant copies`;
+    const dupCount = stats.total_duplicate_files || stats.total_duplicates || 0;
+    const dupGroups = stats.total_duplicates || 0;
+    document.getElementById('stat-duplicate-count').innerText = `${dupCount.toLocaleString('en-US')} redundant files (${dupGroups.toLocaleString('en-US')} groups)`;
 
-    const staleBytes = (this.staleFiles || []).reduce((acc, f) => acc + (f.size || 0), 0);
+    const staleBytes = stats.total_stale_bytes !== undefined && stats.total_stale_bytes > 0 ? stats.total_stale_bytes : (this.staleTotalBytes || 0);
+    const staleCount = stats.total_stale_files !== undefined && stats.total_stale_files > 0 ? stats.total_stale_files : (this.staleTotalFiles || 0);
     document.getElementById('stat-stale-bytes').innerText = this.formatBytes(staleBytes);
-    document.getElementById('stat-stale-count').innerText = `${(this.staleFiles || []).length.toLocaleString('en-US')} files (30+ days)`;
+    document.getElementById('stat-stale-count').innerText = `${staleCount.toLocaleString('en-US')} files (30+ days)`;
 
     const reclaimable = (stats.total_wasted_bytes || 0) + staleBytes;
     document.getElementById('stat-reclaimable-total').innerText = this.formatBytes(reclaimable);
@@ -298,7 +524,7 @@ class StorageApp {
 
     if (heroTitle) heroTitle.innerText = `${this.formatBytes(stats.total_bytes)} Indexed Storage`;
 
-    const staleBytes = (this.staleFiles || []).reduce((acc, f) => acc + (f.size || 0), 0);
+    const staleBytes = stats.total_stale_bytes !== undefined && stats.total_stale_bytes > 0 ? stats.total_stale_bytes : (this.staleTotalBytes || 0);
     const reclaimable = (stats.total_wasted_bytes || 0) + staleBytes;
     if (heroReclaim) heroReclaim.innerText = `${this.formatBytes(reclaimable)} Safe Cleanup Potential`;
 

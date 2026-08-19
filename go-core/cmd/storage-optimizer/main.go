@@ -187,6 +187,13 @@ func handleScan(args []string) {
 		fmt.Printf(Yellow+"[WARN] Failed to record scan snapshot: %v\n"+Reset, err)
 	}
 
+	// Precompute staleness scores & duplicate clusters
+	staleEngine := stale.New(database, stale.Config{NumWorkers: *workersFlag})
+	_, _ = staleEngine.ComputeAndPersistScores(ctx)
+
+	dedupEngine := dedup.New(database, dedup.Config{NumWorkers: *workersFlag})
+	_, _ = dedupEngine.Execute(ctx)
+
 	elapsed := stats.Duration
 	filesPerSec := float64(stats.FilesScanned) / elapsed.Seconds()
 	mbPerSec := (float64(stats.TotalBytes) / (1024 * 1024)) / elapsed.Seconds()
