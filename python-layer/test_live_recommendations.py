@@ -1,8 +1,8 @@
+import sys
+
 from core.api_provider import GoCoreProvider
 from recommend.pipeline import run_recommendation_pipeline
 
-
-ROOT = "/home/vanshpratapsinghjadon/Desktop/storage-optimizer"
 GB = 1024 ** 3
 
 
@@ -20,6 +20,7 @@ def format_bytes(value):
 
 
 def main():
+    root = sys.argv[1] if len(sys.argv) > 1 else None
     provider = GoCoreProvider()
 
     result = run_recommendation_pipeline(
@@ -27,7 +28,7 @@ def main():
         total_capacity_bytes=256 * GB,
         forecast_days=365,
         stale_days=30,
-        root=ROOT,
+        root=root,
     )
 
     print("\n=== LIVE GO CORE RECOMMENDATIONS ===")

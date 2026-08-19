@@ -143,7 +143,7 @@ def is_forecast_valid(
 
 def forecast_storage_from_provider(
     provider: DataProvider,
-    root: str,
+    root: str | None = None,
     forecast_days: int = 30,
     validation_size: int = 3,
 ) -> ForecastResult:
@@ -157,7 +157,7 @@ def forecast_storage_from_provider(
     valid_snapshots = [
         snapshot
         for snapshot in snapshots
-        if snapshot.root_path == root
+        if (root is None or snapshot.root_path == root or snapshot.root_path.startswith(root))
         and snapshot.total_files > 0
         and snapshot.total_bytes > 0
     ]
@@ -166,17 +166,11 @@ def forecast_storage_from_provider(
         key=lambda snapshot: snapshot.scanned_at
     )
 
-    model_training_minimum = 4  # Holt-Winters requirement
-
-    minimum_required = (
-        validation_size
-        + model_training_minimum
-    )
-
-    if len(valid_snapshots) < minimum_required:
+    if len(valid_snapshots) < 2:
+        target_name = root if root is not None else "all roots"
         raise ValueError(
-            f"Not enough valid snapshots for root {root!r}. "
-            f"Required {minimum_required}, "
+            f"Not enough valid snapshots for {target_name!r}. "
+            f"Required at least 2 snapshots, "
             f"received {len(valid_snapshots)}."
         )
 
@@ -194,13 +188,28 @@ def forecast_storage(
 
     if len(snapshots) < validation_size + 10:
         raise ValueError(
-            "Not enough snapshots for forecasting."
+            "At least 2 snapshots are required for forecasting."
         )
 
     snapshots = sorted(
         snapshots,
         key=lambda snapshot: snapshot.scanned_at,
     )
+
+    latest_date = snapshots[-1].scanned_at
+    future_dates = create_future_dates(
+        latest_date,
+        forecast_days,
+    )
+
+    if len(snapshots) == 2:
+        forecast_points = forecast_linear(snapshots, future_dates)
+        return ForecastResult(
+            model_name="Linear Regression",
+            forecast_points=forecast_points,
+            mae_bytes=0.0,
+            rmse_bytes=0.0,
+        )
 
     # ----------------------------------------
     # 1. Evaluate models

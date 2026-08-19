@@ -14,7 +14,7 @@ def calculate_mae(
             actual,
             predicted,
         )
-    )
+    return float(np.mean(np.abs(np.asarray(actual) - np.asarray(predicted))))
 
 
 def calculate_rmse(

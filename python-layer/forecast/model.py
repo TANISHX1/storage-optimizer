@@ -3,9 +3,19 @@ from datetime import datetime, timedelta
 from typing import List
 
 import numpy as np
-from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import PolynomialFeatures
-from statsmodels.tsa.holtwinters import ExponentialSmoothing
+
+try:
+    from sklearn.linear_model import LinearRegression
+    from sklearn.preprocessing import PolynomialFeatures
+    _HAS_SKLEARN = True
+except ImportError:
+    _HAS_SKLEARN = False
+
+try:
+    from statsmodels.tsa.holtwinters import ExponentialSmoothing
+    _HAS_STATSMODELS = True
+except ImportError:
+    _HAS_STATSMODELS = False
 
 from core.models import Snapshot
 
@@ -24,8 +34,12 @@ class LinearForecastModel:
     """
 
     def __init__(self):
-        self.model = LinearRegression()
         self.start_time: datetime | None = None
+        self.coeffs: np.ndarray | None = None
+        if _HAS_SKLEARN:
+            self.model = LinearRegression()
+        else:
+            self.model = None
 
     def fit(self, snapshots: List[Snapshot]):
         if len(snapshots) < 2:
@@ -41,21 +55,22 @@ class LinearForecastModel:
         self.start_time = snapshots[0].scanned_at
 
         x = np.array([
-            [
-                (
-                    snapshot.scanned_at
-                    - self.start_time
-                ).total_seconds() / 86400
-            ]
+            (
+                snapshot.scanned_at
+                - self.start_time
+            ).total_seconds() / 86400
             for snapshot in snapshots
-        ])
+        ], dtype=float)
 
         y = np.array([
             snapshot.total_bytes
             for snapshot in snapshots
-        ])
+        ], dtype=float)
 
-        self.model.fit(x, y)
+        if self.model is not None:
+            self.model.fit(x.reshape(-1, 1), y)
+        else:
+            self.coeffs = np.polyfit(x, y, 1)
 
         return self
 
@@ -70,15 +85,16 @@ class LinearForecastModel:
             )
 
         x = np.array([
-            [
-                (
-                    date - self.start_time
-                ).total_seconds() / 86400
-            ]
+            (
+                date - self.start_time
+            ).total_seconds() / 86400
             for date in future_dates
-        ])
+        ], dtype=float)
 
-        predictions = self.model.predict(x)
+        if self.model is not None:
+            predictions = self.model.predict(x.reshape(-1, 1))
+        else:
+            predictions = np.polyval(self.coeffs, x)
 
         return np.maximum(predictions, 0)
 
@@ -90,11 +106,16 @@ class PolynomialForecastModel:
 
     def __init__(self, degree: int = 2):
         self.degree = degree
-        self.model = LinearRegression()
-        self.transformer = PolynomialFeatures(
-            degree=degree
-        )
         self.start_time: datetime | None = None
+        self.coeffs: np.ndarray | None = None
+        if _HAS_SKLEARN:
+            self.model = LinearRegression()
+            self.transformer = PolynomialFeatures(
+                degree=degree
+            )
+        else:
+            self.model = None
+            self.transformer = None
 
     def fit(self, snapshots: List[Snapshot]):
         if len(snapshots) < 3:
@@ -110,23 +131,23 @@ class PolynomialForecastModel:
         self.start_time = snapshots[0].scanned_at
 
         x = np.array([
-            [
-                (
-                    snapshot.scanned_at
-                    - self.start_time
-                ).total_seconds() / 86400
-            ]
+            (
+                snapshot.scanned_at
+                - self.start_time
+            ).total_seconds() / 86400
             for snapshot in snapshots
-        ])
+        ], dtype=float)
 
         y = np.array([
             snapshot.total_bytes
             for snapshot in snapshots
-        ])
+        ], dtype=float)
 
-        x_poly = self.transformer.fit_transform(x)
-
-        self.model.fit(x_poly, y)
+        if self.model is not None and self.transformer is not None:
+            x_poly = self.transformer.fit_transform(x.reshape(-1, 1))
+            self.model.fit(x_poly, y)
+        else:
+            self.coeffs = np.polyfit(x, y, self.degree)
 
         return self
 
@@ -141,17 +162,17 @@ class PolynomialForecastModel:
             )
 
         x = np.array([
-            [
-                (
-                    date - self.start_time
-                ).total_seconds() / 86400
-            ]
+            (
+                date - self.start_time
+            ).total_seconds() / 86400
             for date in future_dates
-        ])
+        ], dtype=float)
 
-        x_poly = self.transformer.transform(x)
-
-        predictions = self.model.predict(x_poly)
+        if self.model is not None and self.transformer is not None:
+            x_poly = self.transformer.transform(x.reshape(-1, 1))
+            predictions = self.model.predict(x_poly)
+        else:
+            predictions = np.polyval(self.coeffs, x)
 
         return np.maximum(predictions, 0)
 
@@ -159,15 +180,13 @@ class PolynomialForecastModel:
 class HoltWintersForecastModel:
     """
     Holt's exponential smoothing model.
-
-    We initially use trend='add' without seasonality because
-    storage snapshots do not yet provide enough history to
-    reliably establish seasonal behavior.
     """
 
     def __init__(self):
-        self.model = None
         self.forecast_model = None
+        self.level: float | None = None
+        self.trend: float | None = None
+        self.phi: float = 0.98
 
     def fit(self, snapshots: List[Snapshot]):
         if len(snapshots) < 4:
@@ -185,12 +204,25 @@ class HoltWintersForecastModel:
             for snapshot in snapshots
         ], dtype=float)
 
-        self.forecast_model = ExponentialSmoothing(
-            values,
-            trend="add",
-            damped_trend=True,
-            initialization_method="estimated",
-        ).fit()
+        if _HAS_STATSMODELS:
+            self.forecast_model = ExponentialSmoothing(
+                values,
+                trend="add",
+                damped_trend=True,
+                initialization_method="estimated",
+            ).fit()
+        else:
+            alpha = 0.3
+            beta = 0.1
+            phi = self.phi
+            level = values[0]
+            trend = (values[-1] - values[0]) / max(1, len(values) - 1)
+            for t in range(1, len(values)):
+                new_level = alpha * values[t] + (1 - alpha) * (level + phi * trend)
+                trend = beta * (new_level - level) + (1 - beta) * phi * trend
+                level = new_level
+            self.level = level
+            self.trend = trend
 
         return self
 
@@ -199,14 +231,21 @@ class HoltWintersForecastModel:
         steps: int,
     ) -> np.ndarray:
 
-        if self.forecast_model is None:
+        if _HAS_STATSMODELS and self.forecast_model is not None:
+            predictions = self.forecast_model.forecast(
+                steps
+            )
+        elif self.level is not None and self.trend is not None:
+            preds = []
+            cum_phi = 0.0
+            for h in range(1, steps + 1):
+                cum_phi += (self.phi ** h)
+                preds.append(self.level + cum_phi * self.trend)
+            predictions = np.array(preds)
+        else:
             raise RuntimeError(
                 "Model must be fitted before prediction."
             )
-
-        predictions = self.forecast_model.forecast(
-            steps
-        )
 
         return np.maximum(
             np.asarray(predictions),
