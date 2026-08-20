@@ -118,6 +118,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// Staleness & Inactive Storage
 	mux.HandleFunc("/api/v1/files/stale", s.handleStale)
 
+	// Directory Hierarchy Lazy Browsing (Fix 6)
+	mux.HandleFunc("/api/v1/files/browse", s.handleBrowse)
+
 	// Historical Snapshots (Time-Series for Sahil's Python Layer)
 	mux.HandleFunc("/api/v1/snapshots", s.handleSnapshots)
 
@@ -130,7 +133,10 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	guiCandidates := []string{
 		"gui/frontend/dist",
 		"../gui/frontend/dist",
+		"gui/frontend",
+		"../gui/frontend",
 		"/home/blazex/Documents/git/storage-optimizer/gui/frontend/dist",
+		"/home/blazex/Documents/git/storage-optimizer/gui/frontend",
 	}
 
 	for _, dir := range guiCandidates {
@@ -277,6 +283,22 @@ func (s *Server) executeBackgroundScan(targetPath string, workers int, noPrune b
 		log.Printf("[API Scan] Snapshot recording error: %v\n", snapErr)
 	}
 
+	// Fix 1: Precompute staleness scores and duplicate clusters during the scan phase
+	staleEngine := stale.New(s.db, stale.Config{NumWorkers: workers})
+	if scoredCount, err := staleEngine.ComputeAndPersistScores(ctx); err != nil {
+		log.Printf("[API Scan] Staleness score calculation error: %v\n", err)
+	} else {
+		log.Printf("[API Scan] Precomputed staleness scores for %d files\n", scoredCount)
+	}
+
+	dedupEngine := dedup.New(s.db, dedup.Config{NumWorkers: workers})
+	if dedupReport, err := dedupEngine.Execute(ctx); err != nil {
+		log.Printf("[API Scan] Duplicate clustering error: %v\n", err)
+	} else {
+		log.Printf("[API Scan] Deduplication identified %d clusters (%d files, %d wasted bytes)\n",
+			dedupReport.TotalGroups, dedupReport.TotalDuplicateFiles, dedupReport.TotalWastedBytes)
+	}
+
 	completedAt := time.Now()
 	s.scanMu.Lock()
 	defer s.scanMu.Unlock()
@@ -310,12 +332,26 @@ func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, statusCopy)
 }
 
-// handleDuplicates executes duplicate detection or retrieves existing groups.
-// GET /api/v1/files/duplicates?full=true&workers=8
+// handleDuplicates retrieves duplicate clusters with pagination (Pure Read by default).
+// GET /api/v1/files/duplicates?page=1&limit=50&full=false
 func (s *Server) handleDuplicates(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
+	}
+
+	page := 1
+	if pStr := r.URL.Query().Get("page"); pStr != "" {
+		if pVal, err := strconv.Atoi(pStr); err == nil && pVal > 0 {
+			page = pVal
+		}
+	}
+
+	limit := 50
+	if lStr := r.URL.Query().Get("limit"); lStr != "" {
+		if lVal, err := strconv.Atoi(lStr); err == nil && lVal > 0 {
+			limit = lVal
+		}
 	}
 
 	fullRehash := r.URL.Query().Get("full") == "true"
@@ -332,7 +368,15 @@ func (s *Server) handleDuplicates(w http.ResponseWriter, r *http.Request) {
 		ForceRehash: fullRehash,
 	})
 
-	report, err := engine.Execute(r.Context())
+	var report *models.DedupReport
+	var err error
+
+	if fullRehash {
+		report, err = engine.Execute(r.Context())
+	} else {
+		report, err = engine.GetDuplicatesReportPaginated(r.Context(), page, limit)
+	}
+
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Duplicate detection failed: %v", err))
 		return
@@ -341,8 +385,8 @@ func (s *Server) handleDuplicates(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, report)
 }
 
-// handleStale calculates or retrieves inactive files.
-// GET /api/v1/files/stale?days=30&min_score=0.05&limit=50
+// handleStale retrieves precomputed inactive files with pagination (Pure Read).
+// GET /api/v1/files/stale?days=30&min_score=0.05&page=1&limit=50
 func (s *Server) handleStale(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -363,7 +407,14 @@ func (s *Server) handleStale(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	limit := 100
+	page := 1
+	if pStr := r.URL.Query().Get("page"); pStr != "" {
+		if pVal, err := strconv.Atoi(pStr); err == nil && pVal > 0 {
+			page = pVal
+		}
+	}
+
+	limit := 50
 	if lStr := r.URL.Query().Get("limit"); lStr != "" {
 		if lVal, err := strconv.Atoi(lStr); err == nil && lVal > 0 {
 			limit = lVal
@@ -374,13 +425,35 @@ func (s *Server) handleStale(w http.ResponseWriter, r *http.Request) {
 		NumWorkers: runtime.NumCPU(),
 	})
 
-	report, err := engine.FindStaleFiles(r.Context(), days, minScore, limit)
+	report, err := engine.FindStaleFilesPaginated(r.Context(), days, minScore, page, limit)
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Staleness calculation failed: %v", err))
 		return
 	}
 
 	s.writeJSON(w, http.StatusOK, report)
+}
+
+// handleBrowse returns direct files and child directories for lazy directory traversal (Fix 6).
+// GET /api/v1/files/browse?path=/target/dir
+func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	dirPath := r.URL.Query().Get("path")
+	if dirPath == "" {
+		dirPath = "/"
+	}
+
+	resp, err := s.db.BrowseDirectory(r.Context(), dirPath)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to browse directory: %v", err))
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, resp)
 }
 
 // handleSnapshots returns historical scan snapshots for time-series analytics (Sahil's Python Layer).

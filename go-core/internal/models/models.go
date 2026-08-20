@@ -28,18 +28,20 @@ const (
 // FileMetadata represents the complete metadata captured for a single regular file
 // from the Linux filesystem before or after indexing in SQLite.
 type FileMetadata struct {
-	ID             int64        `json:"id"`              // SQLite autoincrement primary key
-	Path           string       `json:"path"`            // Absolute path on filesystem (UNIQUE)
-	Size           int64        `json:"size"`            // Size in bytes
-	Mtime          time.Time    `json:"mtime"`           // Last modification time
-	Atime          time.Time    `json:"atime"`           // Last access time (Linux atime/relatime)
-	Inode          uint64       `json:"inode"`           // Linux filesystem Inode number (identifies hardlinks)
-	Extension      string       `json:"extension"`       // Lowercase file extension (e.g. ".log", ".mp4")
-	ContentHash    string       `json:"content_hash"`    // SHA-256 hexadecimal digest (populated during Phase 2)
-	StalenessScore float64      `json:"staleness_score"` // 0.0 (fresh/protected) to 1.0 (extremely stale) (Phase 3)
-	IsSystem       bool         `json:"is_system"`       // True if file resides in OS system paths
-	Category       FileCategory `json:"category"`        // File category (user, system_protected, system_log, crash_dump, temp, system_cache)
-	LastScannedAt  time.Time    `json:"last_scanned_at"`  // Timestamp of the scan that recorded this entry
+	ID               int64        `json:"id"`                 // SQLite autoincrement primary key
+	Path             string       `json:"path"`               // Absolute path on filesystem (UNIQUE)
+	Size             int64        `json:"size"`               // Size in bytes
+	Mtime            time.Time    `json:"mtime"`              // Last modification time
+	Atime            time.Time    `json:"atime"`              // Last access time (Linux atime/relatime)
+	Inode            uint64       `json:"inode"`              // Linux filesystem Inode number (identifies hardlinks)
+	Extension        string       `json:"extension"`          // Lowercase file extension (e.g. ".log", ".mp4")
+	ContentHash      string       `json:"content_hash"`       // SHA-256 hexadecimal digest (populated during Phase 2)
+	DuplicateGroupID string       `json:"duplicate_group_id"` // Duplicate cluster ID (Fix 4)
+	ParentPath       string       `json:"parent_path"`        // Immediate parent directory (Fix 6)
+	StalenessScore   float64      `json:"staleness_score"`    // 0.0 (fresh/protected) to 1.0 (extremely stale) (Phase 3)
+	IsSystem         bool         `json:"is_system"`          // True if file resides in OS system paths
+	Category         FileCategory `json:"category"`           // File category (user, system_protected, system_log, crash_dump, temp, system_cache)
+	LastScannedAt    time.Time    `json:"last_scanned_at"`     // Timestamp of the scan that recorded this entry
 }
 
 // ScanSnapshot captures a point-in-time summary of the indexed filesystem.
@@ -66,6 +68,9 @@ type DedupReport struct {
 	TotalGroups         int              `json:"total_groups"`          // Total clusters of duplicate files
 	TotalDuplicateFiles int              `json:"total_duplicate_files"` // Total count of redundant files
 	TotalWastedBytes    int64            `json:"total_wasted_bytes"`    // Total storage that can be reclaimed
+	Page                int              `json:"page,omitempty"`        // Current pagination page (1-indexed)
+	Limit               int              `json:"limit,omitempty"`       // Max groups per page
+	TotalPages          int              `json:"total_pages,omitempty"`  // Total available pages
 	Groups              []DuplicateGroup `json:"groups"`                // Sorted duplicate clusters (largest wasted first)
 	Duration            time.Duration    `json:"duration"`              // Time taken to perform duplicate analysis
 }
@@ -85,10 +90,37 @@ type FileStalenessUpdate struct {
 // StaleReport aggregates results of files exceeding staleness thresholds.
 type StaleReport struct {
 	ThresholdDays int            `json:"threshold_days"` // Minimum untouched days requested (e.g. 30, 90, 180)
+	MinScore      float64        `json:"min_score,omitempty"`
 	TotalFiles    int            `json:"total_files"`    // Total stale files matching criteria
 	TotalBytes    int64          `json:"total_bytes"`    // Total disk storage occupied by stale files
+	Page          int            `json:"page,omitempty"` // Current pagination page (1-indexed)
+	Limit         int            `json:"limit,omitempty"`
+	TotalPages    int            `json:"total_pages,omitempty"`
 	Files         []FileMetadata `json:"files"`          // Stale files sorted by score (descending) and size (descending)
 	Duration      time.Duration  `json:"duration"`       // Computation duration
+}
+
+// DirectoryBrowseItem represents a single file or subdirectory when browsing hierarchy (Fix 6).
+type DirectoryBrowseItem struct {
+	Path           string       `json:"path"`
+	Name           string       `json:"name"`
+	IsDir          bool         `json:"is_dir"`
+	Size           int64        `json:"size"`
+	ItemCount      int64        `json:"item_count,omitempty"` // Aggregated child count if directory
+	Mtime          time.Time    `json:"mtime"`
+	Category       FileCategory `json:"category,omitempty"`
+	IsSystem       bool         `json:"is_system"`
+	StalenessScore float64      `json:"staleness_score,omitempty"`
+	IsDuplicate    bool         `json:"is_duplicate,omitempty"`
+}
+
+// DirectoryBrowseResponse represents the contents of a directory level (Fix 6).
+type DirectoryBrowseResponse struct {
+	CurrentPath string                `json:"current_path"`
+	ParentPath  string                `json:"parent_path"`
+	TotalItems  int                   `json:"total_items"`
+	TotalBytes  int64                 `json:"total_bytes"`
+	Items       []DirectoryBrowseItem `json:"items"`
 }
 
 // CategoryBreakdown represents aggregated file counts and bytes for a single category.
@@ -100,12 +132,15 @@ type CategoryBreakdown struct {
 
 // StorageStats represents overall storage analysis metrics for dashboard views.
 type StorageStats struct {
-	TotalFiles       int64               `json:"total_files"`
-	TotalBytes       int64               `json:"total_bytes"`
-	TotalDuplicates  int                 `json:"total_duplicates"`
-	TotalWastedBytes int64               `json:"total_wasted_bytes"`
-	TotalSnapshots   int                 `json:"total_snapshots"`
-	Categories       []CategoryBreakdown `json:"categories"`
+	TotalFiles          int64               `json:"total_files"`
+	TotalBytes          int64               `json:"total_bytes"`
+	TotalDuplicates     int                 `json:"total_duplicates"`      // Total duplicate groups / clusters
+	TotalDuplicateFiles int                 `json:"total_duplicate_files"` // Total redundant copy files
+	TotalWastedBytes    int64               `json:"total_wasted_bytes"`
+	TotalStaleFiles     int                 `json:"total_stale_files"`
+	TotalStaleBytes     int64               `json:"total_stale_bytes"`
+	TotalSnapshots      int                 `json:"total_snapshots"`
+	Categories          []CategoryBreakdown `json:"categories"`
 }
 
 // ScanRequest defines the payload for initiating a directory scan via HTTP API.
