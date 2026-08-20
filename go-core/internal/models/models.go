@@ -105,6 +105,7 @@ type DirectoryBrowseItem struct {
 	Path           string       `json:"path"`
 	Name           string       `json:"name"`
 	IsDir          bool         `json:"is_dir"`
+	IsScanned      bool         `json:"is_scanned"`           // True if indexed in DB, false if physical dir not yet scanned
 	Size           int64        `json:"size"`
 	ItemCount      int64        `json:"item_count,omitempty"` // Aggregated child count if directory
 	Mtime          time.Time    `json:"mtime"`
