@@ -3,7 +3,7 @@ from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-
+from forecast.capacity import calculate_capacity_prediction
 from core.api_provider import GoCoreAPIError, GoCoreProvider
 from forecast.forecast import (
     get_forecast_status,
@@ -94,7 +94,7 @@ def build_forecast(
     root: Optional[str] = None,
     forecast_days: int = FORECAST_DAYS,
 ) -> dict[str, Any]:
-    snapshots = provider.get_snapshots(root=root, limit=1000)
+    snapshots = provider.get_snapshots(root=root)
 
     if not snapshots:
         return {
@@ -218,7 +218,7 @@ def forecast(
 ):
     try:
         provider = load_provider()
-        snapshots = provider.get_snapshots(root=root, limit=1000)
+        snapshots = provider.get_snapshots(root=root)
 
         if not snapshots:
             return {
@@ -263,7 +263,7 @@ def capacity(
     try:
         provider = load_provider()
         capacity_bytes = total_capacity if (total_capacity and total_capacity > 0) else DEFAULT_TOTAL_CAPACITY_BYTES
-        snapshots = provider.get_snapshots(root=root, limit=1000)
+        snapshots = provider.get_snapshots(root=root)
 
         if not snapshots:
             return {

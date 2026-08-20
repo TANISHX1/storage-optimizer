@@ -62,22 +62,18 @@ def get_history_span_days(
         - ordered[0].scanned_at
     ).total_seconds() / 86400
 
+# In forecast/forecast.py
+
 def get_forecast_status(
     snapshots: list[Snapshot],
     root: str | None = None,
 ) -> ForecastStatus:
-
     valid_snapshots = [
-        snapshot
-        for snapshot in snapshots
-        if snapshot.total_files > 0
-        and snapshot.total_bytes > 0
+        s for s in snapshots if s.total_files > 0 and s.total_bytes > 0
     ]
+    valid_snapshots.sort(key=lambda s: s.scanned_at)
 
-    valid_snapshots.sort(
-        key=lambda snapshot: snapshot.scanned_at
-    )
-
+    # 1. Check snapshot count first (without referencing history_days)
     if len(valid_snapshots) < MIN_FORECAST_SNAPSHOTS:
         return ForecastStatus(
             status="warming_up",
@@ -85,16 +81,13 @@ def get_forecast_status(
             snapshots_available=len(valid_snapshots),
             snapshots_required=MIN_FORECAST_SNAPSHOTS,
             message=(
-                f"Only {history_days:.2f} days of history are available. "
-                f"At least {MIN_HISTORY_DAYS} days are required "
-                f"for reliable long-range forecasting."
+                f"Only {len(valid_snapshots)} snapshots available. "
+                f"At least {MIN_FORECAST_SNAPSHOTS} are required."
             ),
         )
 
-    history_days = get_history_span_days(
-        valid_snapshots
-    )
-
+    # 2. Check time span
+    history_days = get_history_span_days(valid_snapshots)
     if history_days < MIN_HISTORY_DAYS:
         return ForecastStatus(
             status="warming_up",
@@ -102,10 +95,8 @@ def get_forecast_status(
             snapshots_available=len(valid_snapshots),
             snapshots_required=MIN_FORECAST_SNAPSHOTS,
             message=(
-                f"Only {history_days:.2f} days of history "
-                f"are available. At least "
-                f"{MIN_HISTORY_DAYS} days are required "
-                f"for reliable long-range forecasting."
+                f"Only {history_days:.2f} days of history available. "
+                f"At least {MIN_HISTORY_DAYS} days are required."
             ),
         )
 
@@ -114,10 +105,7 @@ def get_forecast_status(
         root=root,
         snapshots_available=len(valid_snapshots),
         snapshots_required=MIN_FORECAST_SNAPSHOTS,
-        message=(
-            "Enough historical data is available "
-            "for forecasting."
-        ),
+        message="Enough historical data is available for forecasting.",
     )
 
 def is_forecast_valid(

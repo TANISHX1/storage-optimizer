@@ -414,6 +414,7 @@ def evaluate_models(
             test,
             degree=2,
         )
+    )
 
     if len(train) >= 4:
         results.append(
@@ -427,7 +428,6 @@ def evaluate_models(
         raise ValueError("Not enough training snapshots to evaluate any model.")
 
     for order in ARIMA_CANDIDATES:
-
         results.append(
             evaluate_arima(
                 train,
@@ -437,8 +437,6 @@ def evaluate_models(
         )
 
     return results
-
-
 # =========================================================
 # Best Model
 # =========================================================
