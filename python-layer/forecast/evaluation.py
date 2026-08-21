@@ -82,6 +82,9 @@ def evaluate_linear(
                 actual,
                 predicted,
             ),
+            status="valid",
+            reason=None,
+            arima_order=None,
         )
 
     except Exception as exc:
@@ -147,6 +150,9 @@ def evaluate_polynomial(
                 actual,
                 predicted,
             ),
+            status="valid",
+            reason=None,
+            arima_order=None,
         )
 
     except Exception as exc:
@@ -199,6 +205,9 @@ def evaluate_holt_winters(
                 actual,
                 predicted,
             ),
+            status="valid",
+            reason=None,
+            arima_order=None,
         )
 
     except Exception as exc:

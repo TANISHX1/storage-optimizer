@@ -1,7 +1,10 @@
 from core.provider import DataProvider
 
+from forecast.fast_forecast import (
+    run_fast_forecast_from_provider,
+)
+
 from forecast.forecast import (
-    get_unified_forecast,
     ForecastNotReadyError,
 )
 
@@ -84,7 +87,12 @@ def run_recommendation_pipeline(
     # ---------------------------------------------------------
 
     try:
-        forecast_result = get_unified_forecast(provider, root=root)
+        forecast_result = run_fast_forecast_from_provider(
+            provider=provider,
+            root=root,
+            forecast_days=forecast_days,
+            validation_size=3,
+        )
         forecast_status = "ready"
     except ForecastNotReadyError as exc:
         forecast_result = None
