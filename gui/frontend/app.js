@@ -433,20 +433,36 @@ class StorageApp {
 
     let rowsHtml = '';
 
-    // Subdirectories first
+    // Subdirectories first (scanned vs unscanned)
     dirs.forEach(d => {
-      rowsHtml += `
-        <tr class="dir-item-row" onclick="app.browsePath('${d.path.replace(/'/g, "\\'")}')">
-          <td>
-            <span class="dir-icon">📁</span>
-            <strong>${d.name}</strong>
-          </td>
-          <td><span class="badge badge-blue">Directory</span></td>
-          <td class="size-cell">${this.formatBytes(d.size)}</td>
-          <td><span style="color: var(--text-tertiary);">${(d.item_count || 0).toLocaleString('en-US')} files</span></td>
-          <td style="color: var(--text-secondary); font-size: 0.76rem;">${this.formatTimestamp(d.mtime)}</td>
-        </tr>
-      `;
+      const isScanned = d.is_scanned !== false;
+      if (isScanned) {
+        rowsHtml += `
+          <tr class="dir-item-row" onclick="app.browsePath('${d.path.replace(/'/g, "\\'")}')">
+            <td>
+              <span class="dir-icon">📁</span>
+              <strong>${d.name}</strong>
+            </td>
+            <td><span class="badge badge-blue">Indexed</span></td>
+            <td class="size-cell">${this.formatBytes(d.size)}</td>
+            <td><span style="color: var(--text-tertiary);">${(d.item_count || 0).toLocaleString('en-US')} files</span></td>
+            <td style="color: var(--text-secondary); font-size: 0.76rem;">${this.formatTimestamp(d.mtime)}</td>
+          </tr>
+        `;
+      } else {
+        rowsHtml += `
+          <tr class="dir-item-row dir-unscanned" onclick="app.browsePath('${d.path.replace(/'/g, "\\'")}')" title="Not Scanned — Click to browse physical folder">
+            <td style="opacity: 0.5;">
+              <span class="dir-icon" style="filter: grayscale(1); opacity: 0.6;">📁</span>
+              <span style="color: var(--text-tertiary); font-weight: 500;">${d.name}</span>
+            </td>
+            <td><span class="badge badge-unscanned">Not Indexed</span></td>
+            <td class="size-cell" style="opacity: 0.35;">--</td>
+            <td style="opacity: 0.35;"><span style="color: var(--text-tertiary);">0 files</span></td>
+            <td style="color: var(--text-tertiary); font-size: 0.76rem; opacity: 0.35;">${this.formatTimestamp(d.mtime)}</td>
+          </tr>
+        `;
+      }
     });
 
     // Direct files

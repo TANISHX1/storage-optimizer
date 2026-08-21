@@ -896,6 +896,20 @@ body {
 .badge-amber  { background: rgba(255, 159, 10, 0.15); color: var(--apple-orange); border-color: rgba(255, 159, 10, 0.25); }
 .badge-rose   { background: rgba(255, 69, 58, 0.15); color: var(--apple-red); border-color: rgba(255, 69, 58, 0.25); }
 .badge-mint   { background: rgba(99, 230, 226, 0.15); color: var(--apple-mint); border-color: rgba(99, 230, 226, 0.25); }
+.badge-blue   { background: rgba(10, 132, 255, 0.15); color: var(--apple-blue); border-color: rgba(10, 132, 255, 0.25); }
+.badge-unscanned { background: rgba(255, 255, 255, 0.05); color: rgba(255, 255, 255, 0.35); border: 1px dashed rgba(255, 255, 255, 0.15); }
+
+tr.dir-unscanned {
+  transition: opacity 0.2s ease, background-color 0.2s ease;
+}
+
+tr.dir-unscanned:hover {
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+tr.dir-unscanned:hover td {
+  opacity: 0.8 !important;
+}
 
 /* Category Donut Breakdown */
 .category-breakdown-body {

@@ -953,6 +953,7 @@ func (d *DB) BrowseDirectory(ctx context.Context, dirPath string) (*models.Direc
 			Path:           path,
 			Name:           filepath.Base(path),
 			IsDir:          false,
+			IsScanned:      true,
 			Size:           size,
 			Mtime:          time.Unix(mtimeSec, 0),
 			Category:       models.FileCategory(category),
@@ -964,7 +965,7 @@ func (d *DB) BrowseDirectory(ctx context.Context, dirPath string) (*models.Direc
 	}
 	fRows.Close()
 
-	// 2. Query direct subdirectories under cleanDir
+	// 2. Query direct subdirectories under cleanDir from database
 	prefix := cleanDir
 	if !strings.HasSuffix(prefix, "/") {
 		prefix += "/"
@@ -1028,11 +1029,38 @@ func (d *DB) BrowseDirectory(ctx context.Context, dirPath string) (*models.Direc
 			Path:      agg.FullPath,
 			Name:      agg.Name,
 			IsDir:     true,
+			IsScanned: true,
 			Size:      agg.Size,
 			ItemCount: agg.ItemCount,
 			Mtime:     time.Unix(agg.MaxMtime, 0),
 		})
 		resp.TotalBytes += agg.Size
+	}
+
+	// 3. Lazy Physical Directory Read: Read physical subdirectories from OS disk
+	// To support full physical hierarchy browsing with faded unscanned folders.
+	if entries, err := os.ReadDir(cleanDir); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				dirName := entry.Name()
+				if _, exists := subDirMap[dirName]; !exists {
+					fullSubPath := filepath.Join(cleanDir, dirName)
+					modTime := time.Now()
+					if info, err := entry.Info(); err == nil {
+						modTime = info.ModTime()
+					}
+					dirItems = append(dirItems, models.DirectoryBrowseItem{
+						Path:      fullSubPath,
+						Name:      dirName,
+						IsDir:     true,
+						IsScanned: false, // Unscanned physical folder
+						Size:      0,
+						ItemCount: 0,
+						Mtime:     modTime,
+					})
+				}
+			}
+		}
 	}
 
 	resp.Items = append(dirItems, resp.Items...)
