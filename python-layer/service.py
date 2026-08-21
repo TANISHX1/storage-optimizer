@@ -6,9 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from forecast.capacity import calculate_capacity_prediction
 from core.api_provider import GoCoreAPIError, GoCoreProvider
 from forecast.forecast import (
-    get_forecast_status,
-    forecast_storage_from_provider,
-    forecast_storage,
+    get_unified_forecast,
+    ForecastNotReadyError,
+    forecast_storage_from_provider
 )
 from recommend.pipeline import run_recommendation_pipeline
 
@@ -89,81 +89,48 @@ def serialize_recommendation(recommendation) -> dict[str, Any]:
 # Forecast Engine Helper
 # =========================================================
 
+
 def build_forecast(
     provider: GoCoreProvider,
     root: Optional[str] = None,
     forecast_days: int = FORECAST_DAYS,
 ) -> dict[str, Any]:
-    snapshots = provider.get_snapshots(root=root)
-
-    if not snapshots:
-        return {
-            "status": "warming_up",
-            "root": root,
-            "snapshots_available": 0,
-            "snapshots_required": 2,
-            "history_days": 0.0,
-            "message": "No scan snapshots found in database. Perform a filesystem scan to begin time-series forecasting.",
-            "models": None,
-            "selected_model": None,
-        }
-
-    ordered = sorted(snapshots, key=lambda s: s.scanned_at)
-    target_root = root if root is not None else ordered[-1].root_path
-
-    history_days = 0.0
-    if len(ordered) >= 2:
-        history_days = (ordered[-1].scanned_at - ordered[0].scanned_at).total_seconds() / 86400
-
-    status = get_forecast_status(ordered, root=target_root)
-
-    base = {
-        "status": status.status,
-        "root": target_root,
-        "snapshots_available": len(ordered),
-        "snapshots_required": status.snapshots_required,
-        "history_days": history_days,
-    }
-
-    if len(ordered) < 2:
-        base["status"] = "warming_up"
-        base["message"] = (
-            f"1 snapshot recorded. At least 2 snapshots are required for growth trend estimation "
-            f"and {status.snapshots_required} snapshots for multi-model ML validation."
-        )
-        base["models"] = None
-        base["selected_model"] = None
-        return base
-
     try:
-        result = forecast_storage(
-            snapshots=ordered,
-            forecast_days=forecast_days,
-            validation_size=3,
-        )
+        result = get_unified_forecast(provider, root=root)
+    except ForecastNotReadyError as exc:
+        status = exc.status
         return {
-            **base,
-            "status": "ready",
-            "message": f"Forecast generated using {result.model_name}.",
-            "selected_model": result.model_name,
-            "validation": {
-                "mae_bytes": result.mae_bytes,
-                "rmse_bytes": result.rmse_bytes,
-            },
-            "models": {
-                "selected": result.model_name,
-                "points": serialize_forecast_points(result.forecast_points),
-            },
-        }
-    except Exception as exc:
-        return {
-            **base,
-            "status": "warming_up",
-            "message": str(exc),
+            "status": status.status,
+            "root": status.root,
+            "snapshots_available": status.snapshots_available,
+            "snapshots_required": status.snapshots_required,
+            "history_days": status.history_days,
+            "message": status.message,
             "models": None,
             "selected_model": None,
         }
 
+    # forecast_days is a display window into the same unified
+    # result — it never triggers a separate model fit.
+    display_points = result.forecast_points[:forecast_days]
+
+    return {
+        "status": "ready",
+        "root": root,
+        "snapshots_available": result.snapshots_used,
+        "snapshots_required": result.snapshots_required,
+        "history_days": result.history_days,
+        "message": f"Forecast generated using {result.model_name}.",
+        "selected_model": result.model_name,
+        "validation": {
+            "mae_bytes": result.mae_bytes,
+            "rmse_bytes": result.rmse_bytes,
+        },
+        "models": {
+            "selected": result.model_name,
+            "points": serialize_forecast_points(display_points),
+        },
+    }
 
 # =========================================================
 # API Endpoints
@@ -254,11 +221,10 @@ def forecast(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
-
 @app.get("/capacity")
 def capacity(
-    root: Optional[str] = Query(default=None, description="Root directory"),
-    total_capacity: Optional[int] = Query(default=None, description="Total capacity in bytes"),
+    root: Optional[str] = Query(default=None),
+    total_capacity: Optional[int] = Query(default=None),
 ):
     try:
         provider = load_provider()
@@ -279,8 +245,7 @@ def capacity(
                 "message": "No snapshots found in database.",
             }
 
-        ordered = sorted(snapshots, key=lambda s: s.scanned_at)
-        current = ordered[-1]
+        current = max(snapshots, key=lambda s: s.scanned_at)
         target_root = root or current.root_path
 
         base = {
@@ -299,17 +264,11 @@ def capacity(
             "capacity_prediction": None,
         }
 
-        if len(ordered) < 2:
-            base["message"] = "At least 2 snapshots are required for capacity projection."
+        try:
+            result = get_unified_forecast(provider, root=root)
+        except ForecastNotReadyError as exc:
+            base["message"] = exc.status.message
             return base
-
-        from forecast.capacity import calculate_capacity_prediction
-
-        result = forecast_storage(
-            snapshots=ordered,
-            forecast_days=CAPACITY_FORECAST_DAYS,
-            validation_size=3,
-        )
 
         cap_pred = calculate_capacity_prediction(
             current_bytes=current.total_bytes,
@@ -334,14 +293,12 @@ def capacity(
                 "days_until": cap_pred.days_until_100_percent,
             },
         }
-
         return base
     except GoCoreAPIError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
-
-
+    
 @app.get("/recommendations")
 def recommendations(
     root: Optional[str] = Query(default=None, description="Root directory"),

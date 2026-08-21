@@ -34,6 +34,12 @@ class ARIMAForecastModel:
         - upper confidence bound
     """
 
+    # Snapshots are scan-event based, not guaranteed to land on
+    # exact 24h boundaries. This tolerance defines how far a gap
+    # between consecutive snapshots may drift from 24h and still
+    # be considered "daily" for ARIMA purposes.
+    DAILY_TOLERANCE_SECONDS = 3600
+
     def __init__(
         self,
         config: ARIMAConfig | None = None,
@@ -47,6 +53,36 @@ class ARIMAForecastModel:
 
         self.model_fit = None
         self.last_timestamp: datetime | None = None
+
+    @staticmethod
+    def _validate_daily_cadence(
+        timestamps: List[datetime],
+        tolerance_seconds: int = 3600,
+    ) -> None:
+        """
+        ARIMA needs a genuinely regular time index. Rather than
+        silently replacing real scan timestamps with a fabricated
+        pd.date_range(freq="D"), we validate that the real gaps
+        between consecutive snapshots are approximately daily and
+        fail loudly if they are not.
+        """
+
+        if len(timestamps) < 2:
+            return
+
+        expected_seconds = 86400  # seconds in a day
+
+        for earlier, later in zip(timestamps, timestamps[1:]):
+            delta_seconds = (later - earlier).total_seconds()
+
+            if abs(delta_seconds - expected_seconds) > tolerance_seconds:
+                raise ValueError(
+                    "ARIMA requires approximately daily snapshots. "
+                    f"Found a gap of {delta_seconds / 3600:.1f}h between "
+                    f"{earlier.isoformat()} and {later.isoformat()} "
+                    f"(expected ~24h, tolerance "
+                    f"\u00b1{tolerance_seconds / 3600:.1f}h)."
+                )
 
     def fit(
         self,
@@ -88,11 +124,23 @@ class ARIMAForecastModel:
 
         self.last_timestamp = timestamps[-1]
 
-        index = pd.date_range(
-            start=timestamps[0],
-            periods=len(timestamps),
-            freq="D",
+        # IMPORTANT:
+        # Snapshots come from scan events, not a guaranteed daily
+        # cron job. We must NOT replace the real timestamps with a
+        # fabricated pd.date_range(freq="D") sequence -- that would
+        # silently disconnect the model from the actual cadence of
+        # the data (e.g. two scans on the same day, or a multi-day
+        # gap, would get mislabeled as consecutive days).
+        #
+        # Instead we validate that the real timestamps are
+        # approximately daily, and only then tag the index with a
+        # daily frequency so statsmodels is happy.
+        self._validate_daily_cadence(
+            timestamps,
+            tolerance_seconds=self.DAILY_TOLERANCE_SECONDS,
         )
+
+        index = pd.DatetimeIndex(timestamps)
 
         series = pd.Series(
             values,
@@ -100,14 +148,28 @@ class ARIMAForecastModel:
             dtype=float,
         )
 
-        # ARIMA expects a regular time series.
-        inferred_frequency = (
-            series.index.inferred_freq
-        )
+        # We've already confirmed above that the real timestamps
+        # are ~daily, so it's safe to label the index accordingly.
+        # This differs from the original bug: there, freq="D" was
+        # used to fabricate timestamps out of thin air. Here we're
+        # only attaching frequency metadata to real, validated
+        # timestamps, which normalizes each to midnight so
+        # statsmodels can treat the series as regular.
+        series.index = series.index.normalize()
 
-        if inferred_frequency is None:
+        if series.index.has_duplicates:
             raise ValueError(
-                "ARIMA requires regularly spaced timestamps."
+                "Multiple snapshots fall on the same calendar day. "
+                "ARIMA requires at most one observation per day."
+            )
+
+        series = series.asfreq("D")
+
+        if series.isna().any():
+            raise ValueError(
+                "Could not align snapshots to a strict daily "
+                "frequency after validation. This should not "
+                "happen if cadence validation passed; treat as a bug."
             )
 
         self.model_fit = ARIMA(

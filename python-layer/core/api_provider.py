@@ -19,10 +19,6 @@ from .models import (
 from .provider import DataProvider
 
 
-class GoCoreAPIError(RuntimeError):
-    """Raised when the Go Core API cannot be reached or returns an error."""
-
-
 class GoCoreProvider(DataProvider):
     """
     Production DataProvider backed by the Go Core REST API.
@@ -98,19 +94,19 @@ class GoCoreProvider(DataProvider):
     # =========================================================
 
     def get_snapshots(
-    self,
-    root: str | None = None,
-) -> list[Snapshot]:
+        self,
+        root: str | None = None,
+        limit: int = 1000,
+    ) -> list[Snapshot]:
 
         payload = self.client.snapshots(
-        limit=1000,
+        limit=limit,
         root=root,
         )
 
-        result: list[Snapshot] = []
+        result = []
 
         for item in (payload.get("snapshots") or []):
-
             scanned_at = self._parse_datetime(
             item.get("scanned_at")
         )
@@ -123,19 +119,19 @@ class GoCoreProvider(DataProvider):
                     id=int(item.get("id", 0)),
                     scanned_at=scanned_at,
                     root_path=str(
-                    item.get("root_path", "")
+                        item.get("root_path", "")
                     ),
                     total_files=int(
-                    item.get("total_files", 0)
+                        item.get("total_files", 0)
                     ),
                     total_bytes=int(
-                    item.get("total_bytes", 0)
+                        item.get("total_bytes", 0)
                     ),
-            )
+                )
             )
 
         result.sort(
-        key=lambda snapshot: snapshot.scanned_at
+            key=lambda snapshot: snapshot.scanned_at
         )
 
         return result

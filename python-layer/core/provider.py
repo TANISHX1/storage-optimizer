@@ -15,6 +15,7 @@ class DataProvider(ABC):
     def get_snapshots(
         self,
         root: str | None = None,
+        limit: int = 100,
     ) -> List[Snapshot]:
         pass
 
