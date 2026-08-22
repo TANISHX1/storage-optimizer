@@ -136,6 +136,13 @@ body {
   padding: 12px 10px 14px 10px;
   position: relative;
   z-index: 20;
+  transition: margin-left 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease;
+}
+
+.window-frame.sidebar-collapsed .sidebar {
+  margin-left: -236px;
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* Traffic Light Window Controls */
@@ -488,6 +495,40 @@ body {
   height: 100vh;
   overflow: hidden;
   background: var(--sys-bg-base);
+  position: relative;
+}
+
+.sidebar-expand-btn {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 100;
+  width: 32px;
+  height: 32px;
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.window-frame.sidebar-collapsed .sidebar-expand-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sidebar-expand-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  transform: scale(1.05);
 }
 
 /* Modern Toolbar */
@@ -909,6 +950,193 @@ tr.dir-unscanned:hover {
 
 tr.dir-unscanned:hover td {
   opacity: 0.8 !important;
+}
+
+/* Breakdown Analytics Cards */
+.card-header-flex {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-hairline);
+  margin-bottom: 14px;
+}
+
+/* Seamless Breakdown Card Container */
+.breakdown-card-seamless {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  padding: 4px 2px 14px 2px;
+}
+
+/* Circular Radial Extension Breakdown */
+.circle-breakdown-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 34px 0 10px 0;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.circle-node-wrapper {
+  position: relative;
+}
+
+.circle-node {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.025);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), background 0.22s ease, box-shadow 0.22s ease;
+}
+
+.circle-node:hover {
+  transform: scale(1.08);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.circle-node svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg); /* Start progress at top center */
+}
+
+.circle-node .ring-bg {
+  stroke: rgba(255, 255, 255, 0.07);
+  stroke-width: 4.5;
+  fill: transparent;
+}
+
+.circle-node .ring-fill {
+  stroke-width: 4.5;
+  stroke-linecap: round;
+  fill: transparent;
+  transition: stroke-dashoffset 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.circle-node .ring-purple {
+  stroke: #bf5af2;
+}
+
+.circle-node .ring-amber {
+  stroke: #ff9f0a;
+}
+
+.circle-label-wrap {
+  z-index: 2;
+  text-align: center;
+  padding: 0 6px;
+  max-width: 58px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.circle-ext-text {
+  font-weight: 700;
+  font-size: 0.72rem;
+  letter-spacing: 0.4px;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 54px;
+  line-height: 1.1;
+}
+
+.circle-pct-text {
+  font-size: 0.65rem;
+  color: var(--text-tertiary);
+  font-weight: 500;
+  margin-top: 2px;
+}
+
+.circle-node .tooltip-box {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  background: rgba(18, 18, 22, 0.96);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  white-space: nowrap;
+  z-index: 1000;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.7);
+  transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s ease;
+}
+
+.circle-node:hover .tooltip-box {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* Prevent Sidebar Overlap on Upper Side for Left-most Nodes */
+.circle-node-wrapper:first-child .circle-node .tooltip-box,
+.circle-node-wrapper:nth-child(2) .circle-node .tooltip-box {
+  left: 0;
+  transform: translateX(0) translateY(4px);
+}
+
+.circle-node-wrapper:first-child .circle-node:hover .tooltip-box,
+.circle-node-wrapper:nth-child(2) .circle-node:hover .tooltip-box {
+  transform: translateX(0) translateY(0);
+}
+
+/* Prevent Right-edge Overflow on Upper Side for Right-most Nodes */
+.circle-node-wrapper:nth-last-child(1) .circle-node .tooltip-box,
+.circle-node-wrapper:nth-last-child(2) .circle-node .tooltip-box {
+  left: auto;
+  right: 0;
+  transform: translateX(0) translateY(4px);
+}
+
+.circle-node-wrapper:nth-last-child(1) .circle-node:hover .tooltip-box,
+.circle-node-wrapper:nth-last-child(2) .circle-node:hover .tooltip-box {
+  transform: translateX(0) translateY(0);
+}
+
+.tooltip-title {
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.tooltip-row {
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+  margin-top: 3px;
+}
+
+.tooltip-row strong {
+  color: var(--text-primary);
 }
 
 /* Category Donut Breakdown */

@@ -130,6 +130,8 @@ func (d *DB) applySchema(schemaPath string) error {
 	CREATE INDEX IF NOT EXISTS idx_files_mtime ON files(mtime);
 	CREATE INDEX IF NOT EXISTS idx_files_staleness ON files(staleness_score);
 	CREATE INDEX IF NOT EXISTS idx_files_category ON files(category);
+	CREATE INDEX IF NOT EXISTS idx_files_dup_ext ON files(duplicate_group_id, extension);
+	CREATE INDEX IF NOT EXISTS idx_files_stale_score_ext ON files(staleness_score, extension);
 
 	CREATE TABLE IF NOT EXISTS scan_snapshots (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -907,6 +909,185 @@ func (d *DB) GetDuplicateGroups(ctx context.Context) ([]models.DuplicateGroup, e
 	groups, _, _, _, err := d.GetDuplicateGroupsPaginated(ctx, 1, 100000)
 	return groups, err
 }
+
+// GetDuplicateBreakdown computes extension & directory name breakdowns for duplicates.
+func (d *DB) GetDuplicateBreakdown(ctx context.Context) (*models.DuplicateBreakdownResponse, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	resp := &models.DuplicateBreakdownResponse{
+		Extensions:  []models.ExtensionBreakdownItem{},
+		Directories: []models.DirBreakdownItem{},
+	}
+
+	// 1. Extension Breakdown for duplicate files (Check duplicate_group_id first, fallback to size collision)
+	extQuery := `
+	SELECT 
+		CASE WHEN extension = '' THEN 'no extension' ELSE LOWER(extension) END as ext,
+		COUNT(*) as cnt,
+		COALESCE(SUM(size), 0) as total_size
+	FROM files
+	WHERE duplicate_group_id IS NOT NULL AND duplicate_group_id != ''
+	GROUP BY ext
+	ORDER BY total_size DESC
+	LIMIT 10;
+	`
+	rows, err := d.Conn.QueryContext(ctx, extQuery)
+	var grandTotal int64
+	extItems := []models.ExtensionBreakdownItem{}
+	if err == nil {
+		for rows.Next() {
+			var ext string
+			var count, totalSize int64
+			if err := rows.Scan(&ext, &count, &totalSize); err == nil {
+				extItems = append(extItems, models.ExtensionBreakdownItem{
+					Extension:  ext,
+					Count:      count,
+					TotalBytes: totalSize,
+				})
+				grandTotal += totalSize
+			}
+		}
+		rows.Close()
+	}
+
+	// Fallback to size collisions if dedup has not populated duplicate_group_id yet
+	if len(extItems) == 0 {
+		fallbackQuery := `
+		SELECT 
+			CASE WHEN extension = '' THEN 'no extension' ELSE LOWER(extension) END as ext,
+			COUNT(*) as cnt,
+			COALESCE(SUM(size), 0) as total_size
+		FROM files
+		WHERE size > 0 AND size IN (
+			SELECT size FROM files WHERE size > 0 GROUP BY size HAVING COUNT(*) > 1
+		)
+		GROUP BY ext
+		ORDER BY total_size DESC
+		LIMIT 10;
+		`
+		if fRows, err := d.Conn.QueryContext(ctx, fallbackQuery); err == nil {
+			for fRows.Next() {
+				var ext string
+				var count, totalSize int64
+				if err := fRows.Scan(&ext, &count, &totalSize); err == nil {
+					extItems = append(extItems, models.ExtensionBreakdownItem{
+						Extension:  ext,
+						Count:      count,
+						TotalBytes: totalSize,
+					})
+					grandTotal += totalSize
+				}
+			}
+			fRows.Close()
+		}
+	}
+
+	if grandTotal > 0 {
+		for i := range extItems {
+			extItems[i].Percentage = (float64(extItems[i].TotalBytes) / float64(grandTotal)) * 100.0
+		}
+	}
+	resp.Extensions = extItems
+	resp.TotalWastedBytes = grandTotal
+
+	// 2. Directory & Parent Path Breakdown for duplicate clusters
+	dirQuery := `
+	SELECT 
+		parent_path,
+		COUNT(*) as cnt,
+		COALESCE(SUM(size), 0) as total_size
+	FROM files
+	WHERE duplicate_group_id IS NOT NULL AND duplicate_group_id != '' AND parent_path IS NOT NULL AND parent_path != ''
+	GROUP BY parent_path
+	ORDER BY total_size DESC
+	LIMIT 10;
+	`
+	dRows, err := d.Conn.QueryContext(ctx, dirQuery)
+	if err == nil {
+		var dirTotal int64
+		dirItems := []models.DirBreakdownItem{}
+		for dRows.Next() {
+			var pPath string
+			var count, totalSize int64
+			if err := dRows.Scan(&pPath, &count, &totalSize); err == nil {
+				dirName := filepath.Base(pPath)
+				if dirName == "." || dirName == "/" || dirName == "" {
+					dirName = pPath
+				}
+				dirItems = append(dirItems, models.DirBreakdownItem{
+					DirName:    dirName,
+					Count:      count,
+					TotalBytes: totalSize,
+				})
+				dirTotal += totalSize
+			}
+		}
+		dRows.Close()
+
+		if dirTotal > 0 {
+			for i := range dirItems {
+				dirItems[i].Percentage = (float64(dirItems[i].TotalBytes) / float64(dirTotal)) * 100.0
+			}
+		}
+		resp.Directories = dirItems
+	}
+
+	return resp, nil
+}
+
+// GetStaleBreakdown computes file extension breakdown for stale files (staleness_score >= 0.01).
+func (d *DB) GetStaleBreakdown(ctx context.Context) (*models.StaleBreakdownResponse, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	resp := &models.StaleBreakdownResponse{
+		Extensions: []models.ExtensionBreakdownItem{},
+	}
+
+	extQuery := `
+	SELECT 
+		CASE WHEN extension = '' THEN 'no extension' ELSE LOWER(extension) END as ext,
+		COUNT(*) as cnt,
+		COALESCE(SUM(size), 0) as total_size
+	FROM files
+	WHERE staleness_score >= 0.01
+	GROUP BY ext
+	ORDER BY total_size DESC
+	LIMIT 10;
+	`
+	rows, err := d.Conn.QueryContext(ctx, extQuery)
+	if err != nil {
+		return resp, nil
+	}
+	defer rows.Close()
+
+	var grandTotal int64
+	extItems := []models.ExtensionBreakdownItem{}
+	for rows.Next() {
+		var ext string
+		var count, totalSize int64
+		if err := rows.Scan(&ext, &count, &totalSize); err == nil {
+			extItems = append(extItems, models.ExtensionBreakdownItem{
+				Extension:  ext,
+				Count:      count,
+				TotalBytes: totalSize,
+			})
+			grandTotal += totalSize
+		}
+	}
+
+	if grandTotal > 0 {
+		for i := range extItems {
+			extItems[i].Percentage = (float64(extItems[i].TotalBytes) / float64(grandTotal)) * 100.0
+		}
+	}
+	resp.Extensions = extItems
+	resp.TotalStaleBytes = grandTotal
+
+	return resp, nil
+}
+
 
 // BrowseDirectory lists direct child files and aggregated subdirectories of a directory (Fix 6).
 func (d *DB) BrowseDirectory(ctx context.Context, dirPath string) (*models.DirectoryBrowseResponse, error) {

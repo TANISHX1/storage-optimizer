@@ -201,3 +201,31 @@ type ActionResponse struct {
 	Error          string      `json:"error,omitempty"`
 }
 
+// ExtensionBreakdownItem represents duplicate or stale aggregation by file extension.
+type ExtensionBreakdownItem struct {
+	Extension  string  `json:"extension"`
+	Count      int64   `json:"count"`
+	TotalBytes int64   `json:"total_bytes"`
+	Percentage float64 `json:"percentage"`
+}
+
+// DirBreakdownItem represents duplicate directory aggregation by folder name.
+type DirBreakdownItem struct {
+	DirName    string  `json:"dir_name"`
+	Count      int64   `json:"count"`
+	TotalBytes int64   `json:"total_bytes"`
+	Percentage float64 `json:"percentage"`
+}
+
+// DuplicateBreakdownResponse wraps extension and directory duplication summaries.
+type DuplicateBreakdownResponse struct {
+	Extensions       []ExtensionBreakdownItem `json:"extensions"`
+	Directories      []DirBreakdownItem       `json:"directories"`
+	TotalWastedBytes int64                    `json:"total_wasted_bytes"`
+}
+
+// StaleBreakdownResponse wraps stale file extension breakdowns.
+type StaleBreakdownResponse struct {
+	Extensions      []ExtensionBreakdownItem `json:"extensions"`
+	TotalStaleBytes int64                    `json:"total_stale_bytes"`
+}

@@ -113,9 +113,11 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/scan/status", s.handleScanStatus)
 
 	// Duplicate Detection & Wasted Space
+	mux.HandleFunc("/api/v1/files/duplicates/breakdown", s.handleDuplicatesBreakdown)
 	mux.HandleFunc("/api/v1/files/duplicates", s.handleDuplicates)
 
 	// Staleness & Inactive Storage
+	mux.HandleFunc("/api/v1/files/stale/breakdown", s.handleStaleBreakdown)
 	mux.HandleFunc("/api/v1/files/stale", s.handleStale)
 
 	// Directory Hierarchy Lazy Browsing (Fix 6)
@@ -433,6 +435,41 @@ func (s *Server) handleStale(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, report)
 }
+
+// handleDuplicatesBreakdown returns extension & directory duplication analytics.
+// GET /api/v1/files/duplicates/breakdown
+func (s *Server) handleDuplicatesBreakdown(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	resp, err := s.db.GetDuplicateBreakdown(r.Context())
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to get duplicates breakdown: %v", err))
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, resp)
+}
+
+// handleStaleBreakdown returns extension staleness analytics.
+// GET /api/v1/files/stale/breakdown
+func (s *Server) handleStaleBreakdown(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	resp, err := s.db.GetStaleBreakdown(r.Context())
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to get stale breakdown: %v", err))
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, resp)
+}
+
 
 // handleBrowse returns direct files and child directories for lazy directory traversal (Fix 6).
 // GET /api/v1/files/browse?path=/target/dir

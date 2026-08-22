@@ -36,6 +36,11 @@ class StorageApp {
     this.browseParentPath = '';
     this.browseData = null;
 
+    // Breakdown Analytics State
+    this.dupBreakdownMode = 'ext';
+    this.dupBreakdownData = null;
+    this.staleBreakdownData = null;
+
     // Modal State
     this.pendingAction = null; // { mode: 'trash'|'permanent', ids: [], files: [] }
 
@@ -49,6 +54,13 @@ class StorageApp {
     this.healthPollTimer = setInterval(() => this.checkApiHealth(), 10000);
     this.loadAllData();
     this.setupEventListeners();
+  }
+
+  toggleSidebar() {
+    const frame = document.querySelector('.window-frame');
+    if (frame) {
+      frame.classList.toggle('sidebar-collapsed');
+    }
   }
 
   setupWindowControls() {
@@ -268,9 +280,69 @@ class StorageApp {
 
       this.renderDuplicatesList();
       this.renderDupPagination(data);
+      if (page === 1 && !this.dupBreakdownData) {
+        setTimeout(() => this.loadDuplicatesBreakdown(), 0);
+      }
     } catch (err) {
       console.error('Failed to load duplicates:', err);
     }
+  }
+
+  async loadDuplicatesBreakdown() {
+    try {
+      const data = await this.apiRequest('/files/duplicates/breakdown');
+      this.dupBreakdownData = data;
+      this.renderDuplicatesBreakdown();
+    } catch (err) {
+      console.error('Failed to load duplicates breakdown:', err);
+    }
+  }
+
+  renderDuplicatesBreakdown() {
+    const body = document.getElementById('dup-breakdown-body');
+    if (!body) return;
+
+    const exts = (this.dupBreakdownData && this.dupBreakdownData.extensions) || [];
+    if (exts.length === 0) {
+      body.innerHTML = `<div style="width: 100%; padding: 14px; text-align: center; color: var(--text-tertiary); font-size: 0.8rem;">No duplicate file extensions detected. Run a scan to discover duplicate file types.</div>`;
+      return;
+    }
+
+    const C = 219.91; // 2 * PI * 35
+    let html = '';
+    exts.forEach(item => {
+      const pctVal = Math.min(100, Math.max(0, item.percentage || 0));
+      const pctStr = pctVal.toFixed(1);
+      const dashoffset = (C * (1 - pctVal / 100)).toFixed(2);
+      let extLabel = (item.extension || 'other').toUpperCase();
+      if (extLabel.startsWith('.')) extLabel = extLabel.substring(1);
+      if (!extLabel) extLabel = 'FILE';
+
+      html += `
+        <div class="circle-node-wrapper">
+          <div class="circle-node">
+            <svg viewBox="0 0 80 80">
+              <circle class="ring-bg" cx="40" cy="40" r="35"></circle>
+              <circle class="ring-fill ring-purple" cx="40" cy="40" r="35"
+                style="stroke-dasharray: 219.91; stroke-dashoffset: ${dashoffset};"></circle>
+            </svg>
+            <div class="circle-label-wrap">
+              <span class="circle-ext-text">${extLabel}</span>
+              <span class="circle-pct-text">${pctStr}%</span>
+            </div>
+            <div class="tooltip-box">
+              <div class="tooltip-title">
+                <span class="badge badge-purple">.${extLabel.toLowerCase()}</span>
+                <span>${item.count.toLocaleString()} Duplicates</span>
+              </div>
+              <div class="tooltip-row">Wasted Space: <strong>${this.formatBytes(item.total_bytes)}</strong></div>
+              <div class="tooltip-row">Share of Duplicates: <strong>${pctStr}%</strong></div>
+            </div>
+          </div>
+        </div>
+      `;
+    });
+    body.innerHTML = html;
   }
 
   prevDupPage() {
@@ -327,6 +399,9 @@ class StorageApp {
 
       this.renderStaleTable();
       this.renderStalePagination(data);
+      if (page === 1 && !this.staleBreakdownData) {
+        setTimeout(() => this.loadStaleBreakdown(), 0);
+      }
       if (this.stats) {
         this.renderDashboardStats(this.stats);
         this.renderStorageHeroBar(this.stats);
@@ -334,6 +409,63 @@ class StorageApp {
     } catch (err) {
       console.error('Failed to load stale files:', err);
     }
+  }
+
+  async loadStaleBreakdown() {
+    try {
+      const data = await this.apiRequest('/files/stale/breakdown');
+      this.staleBreakdownData = data;
+      this.renderStaleBreakdown();
+    } catch (err) {
+      console.error('Failed to load stale breakdown:', err);
+    }
+  }
+
+  renderStaleBreakdown() {
+    const body = document.getElementById('stale-breakdown-body');
+    if (!body) return;
+
+    const exts = (this.staleBreakdownData && this.staleBreakdownData.extensions) || [];
+    if (exts.length === 0) {
+      body.innerHTML = `<div style="width: 100%; padding: 14px; text-align: center; color: var(--text-tertiary); font-size: 0.8rem;">No stale file extensions detected. Run a scan to discover inactive files.</div>`;
+      return;
+    }
+
+    const C = 219.91; // 2 * PI * 35
+    let html = '';
+    exts.forEach(item => {
+      const pctVal = Math.min(100, Math.max(0, item.percentage || 0));
+      const pctStr = pctVal.toFixed(1);
+      const dashoffset = (C * (1 - pctVal / 100)).toFixed(2);
+      let extLabel = (item.extension || 'other').toUpperCase();
+      if (extLabel.startsWith('.')) extLabel = extLabel.substring(1);
+      if (!extLabel) extLabel = 'FILE';
+
+      html += `
+        <div class="circle-node-wrapper">
+          <div class="circle-node">
+            <svg viewBox="0 0 80 80">
+              <circle class="ring-bg" cx="40" cy="40" r="35"></circle>
+              <circle class="ring-fill ring-amber" cx="40" cy="40" r="35"
+                style="stroke-dasharray: 219.91; stroke-dashoffset: ${dashoffset};"></circle>
+            </svg>
+            <div class="circle-label-wrap">
+              <span class="circle-ext-text">${extLabel}</span>
+              <span class="circle-pct-text">${pctStr}%</span>
+            </div>
+            <div class="tooltip-box">
+              <div class="tooltip-title">
+                <span class="badge badge-amber">.${extLabel.toLowerCase()}</span>
+                <span>${item.count.toLocaleString()} Stale Files</span>
+              </div>
+              <div class="tooltip-row">Stale Storage: <strong>${this.formatBytes(item.total_bytes)}</strong></div>
+              <div class="tooltip-row">Share of Inactive: <strong>${pctStr}%</strong></div>
+            </div>
+          </div>
+        </div>
+      `;
+    });
+    body.innerHTML = html;
   }
 
   prevStalePage() {
