@@ -15,7 +15,9 @@ Both the **Python Forecasting Layer** (Sahil - Day 7) and the **Wails GUI Shell*
 | `POST` | `/api/v1/scan` | Trigger asynchronous directory scan | GUI / CLI |
 | `GET` | `/api/v1/scan/status` | Poll live or last-completed scan status | GUI Progress Bar |
 | `GET` | `/api/v1/files/duplicates` | Get duplicate file clusters and wasted bytes | Python / GUI |
+| `GET` | `/api/v1/files/duplicates/breakdown` | Get top duplicate file extension breakdown analytics | GUI Breakdown |
 | `GET` | `/api/v1/files/stale` | Get stale files (`days`, `min_score`, `limit`) | Python / GUI |
+| `GET` | `/api/v1/files/stale/breakdown` | Get top stale file extension breakdown analytics | GUI Breakdown |
 | `GET` | `/api/v1/snapshots` | Time-series scan snapshots | Python Forecasting Layer |
 | `GET` | `/api/v1/actions/history` | Immutable audit log of past cleanup actions | GUI Audit View |
 | `POST` | `/api/v1/actions` | Execute user-confirmed file cleanup (Phase 6) | GUI Action Modals |

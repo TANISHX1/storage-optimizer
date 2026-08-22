@@ -62,3 +62,47 @@ Immutable audit trail for file cleanup actions (FreeDesktop.org XDG Trash & Perm
 | `file_size` | `INTEGER` | `NOT NULL` | Size in bytes of freed storage |
 | `performed_at` | `INTEGER` | `NOT NULL` | Timestamp of action execution (Unix seconds) |
 
+---
+
+## 3. Performance Indexes & Aggregation Queries
+
+### 3.1 Composite Indexes
+To ensure sub-millisecond query execution across large datasets (~200k+ records), composite indexes accelerate duplicate and stale file breakdown analytics:
+
+```sql
+-- Composite index for duplicate file extension breakdown
+CREATE INDEX IF NOT EXISTS idx_files_dup_ext ON files(duplicate_group_id, extension);
+
+-- Composite index for stale file extension breakdown
+CREATE INDEX IF NOT EXISTS idx_files_stale_score_ext ON files(staleness_score, extension);
+```
+
+### 3.2 SQL Breakdown Aggregations
+
+#### Duplicate Extension Breakdown
+```sql
+SELECT 
+    CASE WHEN extension = '' THEN 'no extension' ELSE extension END AS ext,
+    COUNT(*) AS count,
+    COALESCE(SUM(size), 0) AS total_bytes
+FROM files
+WHERE duplicate_group_id IS NOT NULL AND duplicate_group_id != ''
+GROUP BY ext
+ORDER BY total_bytes DESC
+LIMIT 10;
+```
+
+#### Stale Extension Breakdown
+```sql
+SELECT 
+    CASE WHEN extension = '' THEN 'no extension' ELSE extension END AS ext,
+    COUNT(*) AS count,
+    COALESCE(SUM(size), 0) AS total_bytes
+FROM files
+WHERE staleness_score >= 0.01
+GROUP BY ext
+ORDER BY total_bytes DESC
+LIMIT 10;
+```
+
+

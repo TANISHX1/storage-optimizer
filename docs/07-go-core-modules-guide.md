@@ -498,7 +498,9 @@ The `api` package exposes standard REST endpoints over HTTP on `127.0.0.1:8080`.
 | `POST` | `/api/v1/scan` | `handleScan` | Triggers background filesystem scan |
 | `GET` | `/api/v1/scan/status` | `handleScanStatus` | Live scan progress feed (file count, path, ETA) |
 | `GET` | `/api/v1/files/duplicates` | `handleDuplicates` | Paginated duplicate file clusters |
+| `GET` | `/api/v1/files/duplicates/breakdown` | `handleDuplicateBreakdown` | Top duplicate file extension breakdown analytics |
 | `GET` | `/api/v1/files/stale` | `handleStale` | Ranked stale/inactive files list |
+| `GET` | `/api/v1/files/stale/breakdown` | `handleStaleBreakdown` | Top stale file extension breakdown analytics |
 | `GET` | `/api/v1/browse` | `handleBrowse` | Lazy directory hierarchy navigation |
 | `GET` | `/api/v1/snapshots` | `handleSnapshots` | Time-series historical scan snapshots |
 | `POST` | `/api/v1/actions` | `handleActions` | Executes batch trash or permanent deletion |

@@ -200,7 +200,9 @@ npm install && npm run build
 | `POST`| `/api/v1/scan` | Trigger background filesystem scan (`{"path":"...", "workers":12}`) |
 | `GET` | `/api/v1/scan/status` | Live scan progress feed (file counts, current path, ETA) |
 | `GET` | `/api/v1/files/duplicates` | Paginated duplicate clusters sharing SHA-256 checksums |
+| `GET` | `/api/v1/files/duplicates/breakdown` | Top duplicate file extension breakdown analytics |
 | `GET` | `/api/v1/files/stale` | Ranked stale/inactive files by inactivity days |
+| `GET` | `/api/v1/files/stale/breakdown` | Top stale file extension breakdown analytics |
 | `GET` | `/api/v1/browse` | Lazy directory hierarchy navigation |
 | `GET` | `/api/v1/snapshots` | Historical scan snapshots for time-series charts |
 | `POST`| `/api/v1/actions` | Execute batch trash or permanent deletion |
